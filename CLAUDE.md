@@ -2,8 +2,8 @@
 
 Zepp OS watch face and mini apps for the user's **Amazfit Cheetah (Square)** (not the
 Pro, not the round one). Sideloaded only: the user does not want the Zepp app store,
-and does want the source on GitHub. `README.md` is the user-facing guide; this file is
-what a new session needs to know.
+and does want the source on GitHub. `README.md` is for people; this file is what a new
+session needs to know.
 
 ## Start here
 
@@ -20,7 +20,13 @@ what a new session needs to know.
   remote `origin`). Commit and push only when asked. This machine stores no GitHub
   credentials (no `gh`, no SSH key): a push needs a token from the user each time.
   Commits use the account's GitHub noreply address (set in the repo's git config) so
-  no personal email is published. There is no licence file yet.
+  no personal email is published. Licence: MIT (`LICENSE`).
+- **README rules (user, 2026-11-16).** It is for human readers: short, plain and
+  level-headed. No verification status, no caveats about what is or is not proven, no
+  explanations of platform limits the user already knows, nothing apologetic or
+  promotional. It carries a notice that the whole repo was written by Claude Fable 5.2;
+  keep it. Anything meant for an AI session (what is confirmed on hardware, toolchain
+  traps, API facts) goes in this file, not the README.
 - Keep this file current at the end of a piece of work (the user asked for that).
 
 ## What exists
@@ -118,6 +124,9 @@ Nutrition app fixed it. Treat it as a firmware bug to design around:
 
 ## User preferences
 
+- Nutrition: the user only looks at today. They know Zepp's own calorie tracking cannot
+  be written to and do not want it explained again. (The app still syncs day totals to
+  the phone: 30 days kept on the watch, 180 in the settings page.)
 - Square tiles; icons, not text. Flat colours and **thin lines**: gradients and heavy
   fills look bad on this low-resolution screen.
 - The launcher button belongs in the bottom right corner, for reach.

@@ -2,6 +2,7 @@
   "name": "zepp-apps",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "Zepp OS watch face and mini apps for the Amazfit Cheetah (Square): an app-launcher watch face and a calorie/protein tracker",
   "type": "module",
   "workspaces": [
