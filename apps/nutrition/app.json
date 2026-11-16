@@ -1,0 +1,56 @@
+{
+  "configVersion": "v3",
+  "app": {
+    "appId": 68232,
+    "appName": "Nutrition",
+    "appType": "app",
+    "version": {
+      "code": 1,
+      "name": "0.1.0"
+    },
+    "icon": "icon.png",
+    "vender": "kdenys",
+    "description": "Log calories and protein from the wrist"
+  },
+  "permissions": [
+    "device:os.local_storage",
+    "data:os.device.info"
+  ],
+  "runtime": {
+    "apiVersion": {
+      "compatible": "3.0.0",
+      "target": "3.6.0",
+      "minVersion": "3.0"
+    }
+  },
+  "targets": {
+    "default": {
+      "module": {
+        "page": {
+          "pages": [
+            "page/index",
+            "page/add"
+          ]
+        },
+        "app-side": {
+          "path": "app-side/index"
+        },
+        "setting": {
+          "path": "setting/index"
+        }
+      },
+      "platforms": [
+        {
+          "st": "s",
+          "dw": 390
+        }
+      ]
+    }
+  },
+  "i18n": {
+    "en-US": {
+      "appName": "Nutrition"
+    }
+  },
+  "defaultLanguage": "en-US"
+}
