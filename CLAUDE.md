@@ -16,7 +16,11 @@ what a new session needs to know.
   phone). **Every install is manual work for them.** Do not ship guess-and-check builds;
   ask what can be checked without installing, and batch changes into one install.
 - Mocks only imitate what the docs say. A passing test is not proof on hardware; say so.
-- Nothing is committed yet and there is no licence file. Commit only when asked.
+- Published as the public repo `github.com/kdenystern/zepp-configs` (branch `main`,
+  remote `origin`). Commit and push only when asked. This machine stores no GitHub
+  credentials (no `gh`, no SSH key): a push needs a token from the user each time.
+  Commits use the account's GitHub noreply address (set in the repo's git config) so
+  no personal email is published. There is no licence file yet.
 - Keep this file current at the end of a piece of work (the user asked for that).
 
 ## What exists
