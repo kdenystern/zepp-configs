@@ -57,6 +57,7 @@ const choose = (place) => world.settings.set('place', JSON.stringify(place))
 
 const forecastFetches = () => world.fetched.filter((url) => url.startsWith('https://api.open-meteo.com/'))
 const chip = () => buttons()[0]
+const textWidgets = () => widgetsOf('TEXT')
 const rects = (color) => widgetsOf('FILL_RECT').filter((w) => w.params.color === color)
 const placeCard = () => settingsCards(settingsPage())[0]
 // The line under the Place title.
@@ -177,7 +178,13 @@ test('shows now, then temperature, rain and wind over the day', async () => {
   for (const hour of ['0', '6', '12', '18', '24']) assert.ok(texts().includes(hour))
   // A bar for each of the 14 hours with rain; the 10 already past are dimmer.
   assert.equal(rects(0x3987e5).length, 4)
-  assert.equal(rects(0x1a3d67).length, 10)
+  assert.equal(rects(0x225189).length, 10)
+  // The rain scale runs from 0 to 2 mm, marked in the margin.
+  for (const mark of ['2', '0']) assert.ok(texts().includes(mark))
+  // Rain stays likely all evening, so only the hour now is labelled.
+  const chance = textWidgets().filter((w) => w.params.text.endsWith('%') && w.params.y === 222)
+  assert.deepEqual(chance.map((w) => w.params.text), ['92%'])
+  assert.ok(Math.abs(chance[0].params.x + 22 - (27 + 20.5 * 14)) <= 1, 'centred over 20:00')
   // A "now" line through each of the three charts.
   assert.equal(rects(0x8a8a8a).length, 3)
   rects(0x8a8a8a).forEach((line) => assert.equal(line.params.x, 27 + Math.round((20.2 / 24) * 336) - 1))
@@ -235,9 +242,11 @@ test('tapping the place flips to tomorrow and back', async () => {
   for (const text of ['6°', 'Drizzle', 'Low 5°', '5° to 6°', '11.1 mm, 100%', '6 to 9 m/s, gusts 14']) {
     assert.ok(texts().includes(text), `"${text}" not in ${JSON.stringify(texts())}`)
   }
+  // Rain is likely from midnight on; that is the one label.
+  assert.deepEqual(texts().filter((t) => t.endsWith('%') && t.length < 5), ['100%'])
   // Tomorrow has no "now" and nothing dimmed as past.
   assert.equal(rects(0x8a8a8a).length, 0)
-  assert.equal(rects(0x1a3d67).length, 0)
+  assert.equal(rects(0x225189).length, 0)
 
   tap(chip())
   assert.equal(chip().params.text, 'Helsinki, today')

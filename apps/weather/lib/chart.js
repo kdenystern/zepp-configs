@@ -55,16 +55,49 @@ export function lineRects(values, box, { lo, hi, step = 3, thickness = 3, splitA
 // The y of the line drawn by lineRects at `px` pixels from the left edge.
 export const lineY = (values, box, scale, px) => topAt(values, box, scale)(px)
 
-// One bar per value, standing on the bottom of the box. Values of zero get no
-// bar; anything above zero is at least `minH` tall so a trace still shows.
-// Returns a list as long as `values`, with null where there is no bar.
-export function barRects(values, box, { max, gap = 4, minH = 3 }) {
+// One bar per value, standing on the bottom of the box, on a scale from zero
+// to `max`. Values of zero get no bar; anything above zero is at least `minH`
+// tall so a trace still shows. Returns a list as long as `values`, with null
+// where there is no bar.
+export function barRects(values, box, { max, gap = 4, minH = 4 }) {
   const slot = box.w / values.length
   return values.map((value, i) => {
     if (!(value > 0)) return null
     const h = Math.max(minH, Math.min(box.h, Math.round((value / max) * box.h)))
     return { x: Math.round(box.x + i * slot + gap / 2), y: box.y + box.h - h, w: Math.round(slot - gap), h }
   })
+}
+
+// A step line through hourly `values`: a level across each value's slot and an
+// upright joining it to the next level. Levels that run on unchanged are
+// merged. `splitAt` (pixels from the left edge of the box) marks each piece
+// that ends at or before it with `before`.
+export function stepRects(values, box, { lo, hi, thickness = 2, splitAt = null }) {
+  const span = hi - lo || 1
+  const slot = box.w / values.length
+  const edge = (i) => Math.round(i * slot)
+  const top = (value) =>
+    Math.round(box.y + (1 - (Math.min(hi, Math.max(lo, value)) - lo) / span) * (box.h - thickness))
+  const isBefore = (px) => splitAt !== null && px <= splitAt
+
+  const rects = []
+  let level = null
+  values.forEach((value, i) => {
+    const y = top(value)
+    const before = isBefore(edge(i + 1))
+    if (level && level.y === y && level.before === before) level.w = box.x + edge(i + 1) - level.x
+    else {
+      level = { x: box.x + edge(i), y, w: edge(i + 1) - edge(i), h: thickness, before }
+      rects.push(level)
+    }
+    const next = i + 1 < values.length ? top(values[i + 1]) : y
+    if (next !== y) {
+      const x = edge(i + 1) - Math.floor(thickness / 2)
+      rects.push({ x: box.x + x, y: Math.min(y, next), w: thickness, h: Math.abs(next - y) + thickness, before: isBefore(x) })
+      level = null
+    }
+  })
+  return rects
 }
 
 // A short dash per value at its height, for readings that sit above a line

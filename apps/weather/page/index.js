@@ -1,6 +1,6 @@
 // The Weather app's one screen: a day at a glance. Current conditions on top,
-// then three small charts over the same 24 hours: temperature, rain or snow,
-// and wind. Tapping the place name flips between today and tomorrow.
+// then three charts over the same 24 hours: temperature, rain or snow (the
+// largest, with the chance of it), and wind. Tapping the place name flips between today and tomorrow.
 //
 // The forecast comes from the phone (see app-side/index.js). The last one is
 // kept on the watch, so the screen fills in at once and works without the
@@ -19,10 +19,12 @@ import {
   degrees,
   tempCaption,
   rainCaption,
+  rainScale,
+  chanceMarks,
   windCaption,
   clock,
 } from '../lib/forecast'
-import { range, lineRects, lineY, barRects, dashRects, dim } from '../lib/chart'
+import { range, lineRects, lineY, barRects, stepRects, dashRects, dim } from '../lib/chart'
 import { SERIES } from '../lib/palette'
 
 const storage = new LocalStorage()
@@ -32,11 +34,15 @@ const WIDTH = 390
 // The charts share one time axis: 24 hours, 14 px each.
 const PLOT_X = 27
 const PLOT_W = 336
-const TEMP = { x: PLOT_X, y: 154, w: PLOT_W, h: 74 }
+// Rain gets the most room: temperature barely moves over a day.
+const TEMP = { x: PLOT_X, y: 152, w: PLOT_W, h: 36 }
 // The temperature line keeps clear of its chart's top edge and baseline.
-const TEMP_LINE = { x: PLOT_X, y: TEMP.y + 5, w: PLOT_W, h: TEMP.h - 10 }
-const RAIN = { x: PLOT_X, y: 264, w: PLOT_W, h: 46 }
-const WIND = { x: PLOT_X, y: 346, w: PLOT_W, h: 46 }
+const TEMP_LINE = { x: PLOT_X, y: TEMP.y + 4, w: PLOT_W, h: TEMP.h - 8 }
+// The rain chart: a strip for the chance labels, then the bars under it.
+const RAIN = { x: PLOT_X, y: 222, w: PLOT_W, h: 96 }
+const CHANCE_LABELS = { y: RAIN.y, h: 18 }
+const RAIN_BARS = { x: PLOT_X, y: RAIN.y + 20, w: PLOT_W, h: RAIN.h - 20 }
+const WIND = { x: PLOT_X, y: 352, w: PLOT_W, h: 40 }
 const AXIS_Y = 396
 const STATUS = { x: 95, y: 420, w: 200, h: 22 }
 
@@ -49,14 +55,17 @@ const COLOR = {
   grid: 0x262626,
   baseline: 0x3a3a3a,
   now: 0x8a8a8a,
+  // The chance of rain or snow: a light line over the bars.
+  chance: 0x9cc3f0,
   ...SERIES,
 }
-// Hours already gone are drawn darker.
+// Hours already gone are drawn darker. Rain bars less so, so that a small
+// amount still shows.
 const PAST = 0.45
+const PAST_BARS = 0.6
 
 // The least an axis spans, so a calm, dry, steady day looks like one.
 const MIN_TEMP_SPAN = { c: 6, f: 10 }
-const MIN_RAIN_MAX = { c: 2, f: 0.08 }
 const MIN_WIND_MAX = { ms: 8, kmh: 30, mph: 18, kn: 16 }
 
 const PROBLEMS = {
@@ -227,16 +236,7 @@ Page(
         this.rect(r, r.before ? dim(COLOR.temp, PAST) : COLOR.temp),
       )
 
-      // Rain and snow: a bar per hour.
-      const wet = rainCaption(view, units)
-      this.caption(RAIN, wet.icon, wet.text)
-      const rainMax = Math.max(MIN_RAIN_MAX[units.temp], ...view.rain)
-      barRects(view.rain, RAIN, { max: rainMax }).forEach((r, hour) => {
-        if (!r) return
-        const color = view.snowy[hour] ? COLOR.snow : COLOR.rain
-        const past = nowX !== null && r.x - PLOT_X + r.w <= nowX
-        this.rect(r, past ? dim(color, PAST) : color, r.h >= 6 ? 2 : 0)
-      })
+      this.drawRain(view, units, nowX)
 
       // Wind: a line for the speed, a dash above it for each hour's gusts.
       const windScale = { lo: 0, hi: Math.max(MIN_WIND_MAX[units.wind], view.summary.gustMax) }
@@ -264,6 +264,45 @@ Page(
 
       this.state.status = this.text(STATUS.x, STATUS.y, STATUS.w, STATUS.h, '', 16, COLOR.dim, align.CENTER_H)
       this.showStatus()
+    },
+
+    // Rain and snow: a bar per hour on a scale from zero, marked in the left
+    // margin. Over the bars, a line for the chance of rain or snow (0 to 100%),
+    // labelled where rain becomes likely.
+    drawRain(view, units, nowX) {
+      const wet = rainCaption(view, units)
+      this.caption(RAIN, wet.icon, wet.text)
+
+      const scale = rainScale(view, units)
+      const box = RAIN_BARS
+      this.rect({ x: box.x, y: box.y, w: box.w, h: 1 }, COLOR.grid)
+      this.text(0, box.y - 9, PLOT_X - 4, 18, scale.label, 15, COLOR.dim, align.RIGHT)
+      this.text(0, box.y + box.h - 9, PLOT_X - 4, 18, '0', 15, COLOR.dim, align.RIGHT)
+
+      barRects(view.rain, box, { max: scale.max }).forEach((r, hour) => {
+        if (!r) return
+        const color = view.snowy[hour] ? COLOR.snow : COLOR.rain
+        const past = nowX !== null && r.x - PLOT_X + r.w <= nowX
+        this.rect(r, past ? dim(color, PAST_BARS) : color, r.h >= 6 ? 2 : 0)
+      })
+
+      stepRects(view.prob, box, { lo: 0, hi: 100, splitAt: nowX }).forEach((r) =>
+        this.rect(r, r.before ? dim(COLOR.chance, PAST) : COLOR.chance),
+      )
+
+      // A label over each hour where rain becomes likely, from now on, kept
+      // clear of the scale in the margin.
+      const from = view.nowHour === null ? 0 : Math.floor(view.nowHour)
+      const w = 44
+      let free = PLOT_X - 4
+      chanceMarks(view.prob, from).forEach((hour) => {
+        const x = Math.min(WIDTH - w, Math.max(free, Math.round(PLOT_X + (hour + 0.5) * 14 - w / 2)))
+        // No room: pushed off its hour by the label before, or into it at the edge.
+        if (x > PLOT_X + (hour + 1) * 14 || x < free) return
+        free = x + w
+        const label = `${Math.round(view.prob[hour])}%`
+        this.text(x, CHANCE_LABELS.y, w, CHANCE_LABELS.h, label, 16, COLOR.chance, align.CENTER_H)
+      })
     },
 
     // Place and day (a button that flips the day), then the headline numbers.
@@ -302,7 +341,7 @@ Page(
     // Faint lines at 6, 12 and 18 o'clock, a baseline under each chart, and a
     // brighter line for "now".
     drawGrid(nowX) {
-      ;[TEMP, RAIN, WIND].forEach((box) => {
+      ;[TEMP, RAIN_BARS, WIND].forEach((box) => {
         ;[6, 12, 18].forEach((hour) => {
           this.rect({ x: box.x + hour * 14, y: box.y, w: 1, h: box.h }, COLOR.grid)
         })

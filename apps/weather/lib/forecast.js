@@ -277,7 +277,8 @@ const sum = (values) => values.reduce((total, value) => total + value, 0)
 //
 // Returns null when the forecast does not cover that day. Otherwise:
 //   temp, wind  25 points, 00:00 to 24:00 (readings at each full hour)
-//   rain, gust, snowy, prob  24 slots, one per hour (totals over that hour)
+//   rain, gust, snowy, prob  24 slots, one per hour (totals over that hour;
+//               prob is the chance of rain or snow in that hour, 0-100)
 //   nowHour     position of "now" in the day, 0-24, or null for tomorrow
 export function dayView(forecast, now, tomorrow) {
   const h = forecast.h
@@ -297,6 +298,7 @@ export function dayView(forecast, now, tomorrow) {
   const rain = slots(h.rain)
   const snow = slots(h.snow)
   const gust = slots(h.gust)
+  const prob = slots(h.prob)
   const snowy = rain.map((amount, i) => isSnow(amount, snow[i], forecast.units))
   const codes = h.code.slice(base, base + 24)
   const daylight = h.day.slice(base, base + 24)
@@ -310,12 +312,13 @@ export function dayView(forecast, now, tomorrow) {
     rain,
     gust,
     snowy,
+    prob,
     summary: {
       tempMin: Math.min(...temp),
       tempMax: Math.max(...temp),
       rain: sum(rain.filter((amount, i) => !snowy[i])),
       snow: sum(snow.filter((amount, i) => snowy[i])),
-      prob: Math.max(...slots(h.prob)),
+      prob: Math.max(...prob),
       windMin: Math.min(...wind),
       windMax: Math.max(...wind),
       gustMax: Math.max(...gust),
@@ -335,6 +338,40 @@ export function dayView(forecast, now, tomorrow) {
     view.head = { temp: between(temp), code: codes[hour], isDay: !!daylight[hour], wind: between(wind) }
   }
   return view
+}
+
+// The rain chart's scale, from zero: the top is the first of these that the
+// wettest hour fits under. Amounts are in mm (Celsius) or inches (Fahrenheit).
+const RAIN_STEPS = {
+  c: [1, 2, 5, 10, 20, 50, 100],
+  f: [0.04, 0.1, 0.2, 0.5, 1, 2, 4],
+}
+
+export function rainScale(view, units) {
+  const steps = RAIN_STEPS[units.temp]
+  const wettest = Math.max(...view.rain)
+  const max = steps.find((step) => wettest <= step) || steps[steps.length - 1]
+  // "0.5" in inches is written ".5" to fit the margin beside the chart.
+  return { max, label: String(max).replace(/^0\./, '.') }
+}
+
+// Rain counts as likely from this chance on, and stops being likely once the
+// chance falls below LIKELY_ENDS, so a wobble around one figure is one spell.
+export const LIKELY = 50
+export const LIKELY_ENDS = 30
+
+// The hours, from `from` on, where rain or snow becomes likely: the first hour
+// of each likely spell. A spell already under way at `from` is marked there.
+export function chanceMarks(prob, from) {
+  const marks = []
+  let likely = false
+  for (let hour = Math.max(0, from); hour < prob.length; hour++) {
+    if (!likely && prob[hour] >= LIKELY) {
+      likely = true
+      marks.push(hour)
+    } else if (likely && prob[hour] < LIKELY_ENDS) likely = false
+  }
+  return marks
 }
 
 // --- text ---

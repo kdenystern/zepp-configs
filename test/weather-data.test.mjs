@@ -21,11 +21,13 @@ import {
   degrees,
   tempCaption,
   rainCaption,
+  rainScale,
+  chanceMarks,
   windCaption,
   clock,
   HOURS,
 } from '../apps/weather/lib/forecast.js'
-import { range, lineRects, lineY, barRects, dashRects, dim } from '../apps/weather/lib/chart.js'
+import { range, lineRects, lineY, barRects, stepRects, dashRects, dim } from '../apps/weather/lib/chart.js'
 
 // A real Open-Meteo answer for Helsinki (UTC+2), fetched at 20:00 local time.
 const sample = JSON.parse(readFileSync(new URL('./fixtures/open-meteo-forecast.json', import.meta.url), 'utf8'))
@@ -318,6 +320,36 @@ test('the rain caption covers dry days, snow, both, and traces', () => {
   assert.deepEqual(caption({ rain: one(4, 0.25) }, { temp: 'f', wind: 'mph' }), { icon: 'drop', text: '0.25 in' })
 })
 
+test('the rain scale starts at zero and tops out at a round amount', () => {
+  const top = (rain, units = METRIC) => rainScale({ rain }, units)
+  assert.deepEqual(top([0, 0]), { max: 1, label: '1' })
+  assert.deepEqual(top([0, 0.8]), { max: 1, label: '1' })
+  assert.deepEqual(top([1.6, 0.2]), { max: 2, label: '2' })
+  assert.deepEqual(top([12]), { max: 20, label: '20' })
+  assert.deepEqual(top([500]), { max: 100, label: '100' })
+  const us = { temp: 'f', wind: 'mph' }
+  assert.deepEqual(top([0.03], us), { max: 0.04, label: '.04' })
+  assert.deepEqual(top([0.3], us), { max: 0.5, label: '.5' })
+})
+
+test('the hours where rain becomes likely are marked, once per spell', () => {
+  //            0   1   2   3   4   5   6   7   8   9
+  const prob = [10, 20, 60, 90, 40, 45, 20, 55, 70, 35]
+  assert.deepEqual(chanceMarks(prob, 0), [2, 7])
+  // A dip that stays at 30% or more does not start a new spell.
+  assert.deepEqual(chanceMarks([60, 35, 80], 0), [0])
+  // From now on only; a spell already under way is marked at now.
+  assert.deepEqual(chanceMarks(prob, 3), [3, 7])
+  assert.deepEqual(chanceMarks(prob, 9), [])
+  assert.deepEqual(chanceMarks(Array(24).fill(49), 0), [])
+})
+
+test('the day carries the hourly chance of rain', () => {
+  const view = dayView(compact(), hours(20.2), false)
+  assert.equal(view.prob.length, 24)
+  assert.equal(view.prob[9], 71) // the hour 09:00 to 10:00
+})
+
 test('the wind caption drops what adds nothing', () => {
   const view = dayView(made({}), hours(30), false) // old forecast: no direction
   assert.equal(windCaption(view, { temp: 'c', wind: 'kmh' }), '4 km/h, gusts 6')
@@ -387,9 +419,22 @@ test('bars stand on the baseline, and a trace still shows', () => {
   assert.equal(bars.length, 24)
   assert.equal(bars[0], null)
   assert.deepEqual(bars[2], { x: 57, y: 223, w: 10, h: 23 })
-  assert.equal(bars[3].h, 3)
+  assert.equal(bars[3].h, 4)
   assert.equal(bars[4].h, 46) // clipped to the box
   bars.filter(Boolean).forEach((b) => assert.equal(b.y + b.h, 246))
+})
+
+test('a step line has a level per hour joined by uprights, merged where flat', () => {
+  const box = { x: 10, y: 0, w: 56, h: 52 }
+  const rects = stepRects([0, 0, 50, 100], box, { lo: 0, hi: 100, splitAt: 28 })
+  assert.deepEqual(rects, [
+    { x: 10, y: 50, w: 28, h: 2, before: true },
+    { x: 37, y: 25, w: 2, h: 27, before: true },
+    { x: 38, y: 25, w: 14, h: 2, before: false },
+    { x: 51, y: 0, w: 2, h: 27, before: false },
+    { x: 52, y: 0, w: 14, h: 2, before: false },
+  ])
+  assert.equal(stepRects(Array(24).fill(30), { x: 0, y: 0, w: 336, h: 76 }, { lo: 0, hi: 100 }).length, 1)
 })
 
 test('gust dashes sit at their value, one per hour', () => {

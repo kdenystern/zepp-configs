@@ -59,7 +59,13 @@ from. The always-on display (`SCENE_AOD`) gets the time only.
 
 **Weather.** One page. Header chip (a `BUTTON`: place and day, tap flips today/tomorrow),
 current conditions, then three charts on one 24-hour axis: temperature line, rain/snow
-bars, wind line with gust dashes. The charts are built **only from `FILL_RECT`s**
+bars, wind line with gust dashes. The rain chart is the big one in the middle (user,
+2026-11-17: temperature barely moves over a day, rain matters): bars on a scale from 0
+to a round amount (1, 2, 5... mm; labelled in the left margin, `rainScale`), at least
+4 px for any rain, past hours dimmed only to 60%. Over the bars, the hourly chance of
+rain as a 2 px step line (`stepRects`, 0 to 100%), and a "%" label above each hour where
+rain becomes likely from now on (`chanceMarks`: on at 50%, off below 30%). The user
+asked for the percentages where rain is likely to begin; the step line is my addition. The charts are built **only from `FILL_RECT`s**
 (`lib/chart.js` turns data into rectangles; a "line" is 3 px columns, merged where
 flat), because that is the drawing primitive already proven on the watch and the mock
 preview draws it exactly. `CANVAS` (API 3.0) and `GRADKIENT_POLYLINE` exist in the docs
@@ -163,9 +169,12 @@ Nutrition app fixed it. Treat it as a firmware bug to design around:
 - Launcher scrolling with more than nine tiles.
 - Whether phone config sync works (the user has not said), and `name:` / `screen:`
   targets.
-- The Weather app as a whole (built 2026-11-16, never installed). Its watch drawing uses
-  only `TEXT`, `FILL_RECT`, `BUTTON` and `IMG`. Unseen on hardware: `fetch` in the side
-  service, the settings page's `Select` and `Button` components, whether the side
+- The Weather app: the user has installed it and runs it (2026-11-17, complaining about
+  the rain chart: "doesn't start at actual 0", an hour of 0.8 mm "not displayed at all,
+  even as a small blue bar", no chance shown later in the day). So the side service's
+  `fetch` works. The 0.8 mm report is not reproduced by the mock; likely causes in that
+  build were past bars dimmed to 45% and a 3 px minimum on a 46 px chart. Still unseen
+  since the redesign that followed. Not reported on: whether the side
   service is started by a settings change while the watch app is closed (ZML has code
   for it; if not, the watch's first request does the place lookup instead),
   `Time.getTime()`, and how wide the texts come out in the watch's own font (the
