@@ -37,10 +37,11 @@ session needs to know.
 | `apps/launcher` | Launcher app: scrolling grid of app tiles, configured from the phone | 68231 |
 | `apps/nutrition` | Calorie and protein tracker | 68232 |
 | `apps/weather` | Weather: today (or tomorrow) hour by hour on one screen | 68234 |
-| `shared/` | `config.js` (text config parser), `layout.js` (tile grid), `icons.js` (icon table), `tiles.js` (draw and launch tiles) | |
+| `apps/tasks` | Tasks: today's to-do list, one-off and repeating, checked off on the watch | 68235 |
+| `shared/` | `config.js` (text config parser), `layout.js` (tile grid), `icons.js` (icon table), `tiles.js` (draw and launch tiles), `settings-ui.js` (the dark look of every settings page) | |
 | `test/support/` | Mock watch, phone, BLE link and internet | |
 | `test/fixtures/` | A real Open-Meteo forecast answer (Helsinki), used by weather tests and previews | |
-| `tools/` | `make-icons.mjs`, `preview.mjs`, `sharp.mjs` | |
+| `tools/` | `make-icons.mjs`, `preview.mjs`, `settings-html.mjs`, `sharp.mjs` | |
 
 The app ids are arbitrary sideload ids. `68231` is `LAUNCHER_APP_ID` in
 `shared/config.js` (the watch face button opens it) and `68232` appears in the default
@@ -69,6 +70,43 @@ no key): geocoding for the settings page's search box, and the forecast on the w
 watch stores that in `LocalStorage` and draws it before the phone answers. Units are
 applied by the API, not converted on the watch. The app is not in the Launcher's
 default tiles: the user adds `Weather = app:68234:page/index @weather` on the phone.
+
+**Tasks.** Built 2026-11-16 because the user finds the built-in to-do app poor. Scope
+they set: daily tasks and quick reminders only (projects live in Notion, events in
+Google Calendar), one-off and repeating, stored on the phone for good, today's undone
+tasks shown, a checked task disappears, Undo at the bottom. All the logic is in
+`lib/tasks.js` (pure). Design decisions, all mine unless noted:
+- A task is `{ id, title, repeat, due, done }`. It shows from `due` until checked off
+  (it carries over, shown once). A repeat counts **from the day it was done**
+  (`{days}`, `{months}`) or is the next listed weekday (`{on}`).
+- The database is settings storage key `tasks` (`{ next, tasks }`); finished one-offs
+  are kept in it for good and never sent to the watch. Tasks are typed into the
+  settings page as text ("Workout every 3 days"); `parseTask` reads the repeat off the
+  end. Text entry on the watch was left out: the `KEYBOARD` widget is documented from
+  API 3.0 but unseen on this watch.
+- The watch keeps `{ base, changes, undo }` in `LocalStorage` key `state`: the phone's
+  list, its own unconfirmed checks (full tasks keyed by id), and today's undo stack.
+  `SYNC` sends `{ id: { due, done } }` and gets the active list back; changes are
+  dropped only when the answer covers them, so a lost answer costs nothing. One request
+  at a time. The phone keeps a separate undo stack (key `undo`) for its own Done buttons.
+- The list's day changes at 04:00 (`DAY_STARTS_AT`), on the watch and the phone alike.
+- Watch drawing: per row a `TEXT` (wrap) under an image `BUTTON` (`row.png` is
+  see-through with the ring and rule; `row_p.png` is the pressed look), the same
+  image-button kind as the Launcher tiles. Rows are made once and reused: after a tap
+  the titles are rewritten with `prop.TEXT` and spare rows hidden with `prop.VISIBLE`.
+  `deleteWidget` and `SCROLL_LIST` were avoided as unseen here. Five tasks fit one
+  screen; more scroll.
+- Undo is pinned to the bottom of the screen (user, 2026-11-17: it moving up and down
+  under the list was annoying; it should sit above the tasks when they overflow). The
+  page is two `VIEW_CONTAINER`s, exactly the arrangement of the docs' own sample
+  (`showcase/page/ui/widget/view_container.js`, whose animation shows the button
+  standing still while the list moves): the list in a full-screen one that scrolls, and
+  a 68 px strip at the bottom with `z_index: 1, scroll_enable: 0` holding a black
+  `FILL_RECT` and the Undo `BUTTON`. Both are hidden with `prop.VISIBLE` when there is
+  nothing to undo. `modal` is left at its default, as in the sample. A list longer than
+  five rows gets a black `FILL_RECT` after its end so the last row scrolls clear of the
+  strip. The page itself never scrolls.
+- Not in the Launcher's default tiles: the user adds `Tasks = app:68235:page/index @todo`.
 
 **Launcher.** Any number of tiles up to 60, three square tiles per row; the first nine
 fill one screen under a status line, more rows scroll. Icon tiles are single image
@@ -105,6 +143,17 @@ Nutrition app fixed it. Treat it as a firmware bug to design around:
 - Physical buttons cannot reach custom apps (workout button fixed, lower button is
   sleep), which is why launching goes through the watch face.
 - About 2 GB free on the watch; asset size is not a concern.
+- Tasks (user, 2026-11-17, on the first build): "The todo app is good". They saw Undo
+  move up and down under the list and the add box on the phone as plain text, so that
+  build's rows, check-off, Undo, `prop.VISIBLE` and `prop.MORE` on a `BUTTON`, the sync
+  and the settings page all ran. They did not report on the pieces one by one (wrapped
+  titles, a list longer than a screen), and the page has been rebuilt on
+  `VIEW_CONTAINER`s since, see below.
+- User, 2026-11-17, after installing the rebuilt Tasks: Undo stays at the bottom (so the
+  two-`VIEW_CONTAINER` arrangement works on this watch), and they like the dark settings
+  style (so `View`/`Text`/`Button` styles and the white Add pill render). The pop-up where a `TextInput` value is
+  typed is all white and they hate it ("flashbanged"); `TextInput` documents no prop
+  that styles it, and there is no inline input component.
 
 ## Not yet confirmed on the watch
 
@@ -122,6 +171,14 @@ Nutrition app fixed it. Treat it as a firmware bug to design around:
   `Time.getTime()`, and how wide the texts come out in the watch's own font (the
   page avoids characters beyond `°` on purpose).
 
+- Tasks, the parts nobody has reported on: a list longer than five rows scrolling under
+  the pinned Undo (the black `FILL_RECT` past the last row is meant to lengthen the
+  scroll; if the list will not scroll with Undo showing, suspect the strip's default
+  `modal: 1`), and titles wrapping to two lines.
+- The dark settings pages of Launcher, Nutrition and Weather (same shared style as
+  Tasks, which the user has seen; whether they installed these three is not known), and
+  Weather's unit pills in place of `Select`.
+
 ## User preferences
 
 - Nutrition: the user only looks at today. They know Zepp's own calorie tracking cannot
@@ -129,6 +186,11 @@ Nutrition app fixed it. Treat it as a firmware bug to design around:
   the phone: 30 days kept on the watch, 180 in the settings page.)
 - Square tiles; icons, not text. Flat colours and **thin lines**: gradients and heavy
   fills look bad on this low-resolution screen.
+- Settings pages: dark, matching the Zepp app's dark grey look (asked 2026-11-17 with a
+  screenshot of it; colours in `shared/settings-ui.js` were sampled from that). A thing
+  to tap must look like a button, not like text among other text.
+- On the watch, controls should stay where they are: a button that moves as the content
+  changes is annoying.
 - The launcher button belongs in the bottom right corner, for reach.
 - They plan to build more custom apps, so the Launcher must take any number of tiles.
 - Calorie/protein sync into Zepp's own tracking was wanted; it is impossible (below)
@@ -176,7 +238,14 @@ messaging library source.
 
 **Phone side.** Settings page: `AppSettingsPage({ build(props) })` with `View`,
 `Section`, `Text`, `TextInput` (`multiline`, `rows`), `Button`; state in
-`props.settingsStorage`. ZML (`@zeppos/zml` 0.0.43) gives `this.request`/`onRequest`
+`props.settingsStorage`. Every page here is built from `shared/settings-ui.js`
+(`page`, `card`, `text`, `note`, `field`, `button`, `addButton`, `choice`, `row`), which
+gives each component its colours: dark page, grey cards, white pill for what is chosen.
+`Section` and `Select` are not used because their text colours cannot be set (`Section`
+takes one `style`, `Select` none); `choice` is a row of pill `Button`s instead. A test
+per app (`assertDark`) fails if a text, input or button is left without a colour.
+`TextInput` documents `labelStyle` and `subStyle`; the official `todo-list` sample makes
+its add button by wrapping a label-only `TextInput` in a styled `View`. ZML (`@zeppos/zml` 0.0.43) gives `this.request`/`onRequest`
 and `this.call`/`onCall` both ways plus `onSettingsChange` on the side service, which
 must be defined. ZML from 0.0.28 needs API 3.6, so every `this.request` on the watch is
 wrapped in `try`/`catch` and both apps work from local storage when sync fails.
@@ -221,7 +290,13 @@ cases. `world.internet` is the phone's internet: a function from URL to JSON bod
 (the mock replaces it), so tests of anything time-based are deterministic.
 
 `tools/preview.mjs` reuses the same mocks to draw `docs/*.png` and the watch face's
-preview image. It does not wrap text, so full-screen message texts are not previewed. This machine has no system fonts; `tools/sharp.mjs` points sharp at the
+preview image. The mock's `VIEW_CONTAINER` lists its children in `world.widgets` with
+`parent` set and their coordinates relative to it; the preview draws containers in
+`z_index` order, clipped. `tools/settings-html.mjs <app> <file.html>` writes a settings
+page as plain HTML that only imitates the Zepp components. On 2026-11-17 nothing on
+this machine could screenshot it: T3's browser and the Playwright headless shell both
+fail to start for missing system libraries (libatk and others). `TEXT` with `text_style.WRAP` is wrapped by estimated DejaVu widths, which
+are wider than the watch's font, so a line that wraps there may not wrap on the watch. This machine has no system fonts; `tools/sharp.mjs` points sharp at the
 bundled DejaVu fonts. Tile glyphs come from `@phosphor-icons/core` (MIT).
 
 npm prints "install scripts blocked" warnings for esbuild, sharp and core-js. They are

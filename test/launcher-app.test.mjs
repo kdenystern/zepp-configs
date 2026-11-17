@@ -17,6 +17,7 @@ import {
   settingsStorage,
   settingsText,
   nodes,
+  assertDark,
   systemAppId,
 } from './support/harness.mjs'
 import { DEFAULT_CONFIG_TEXT } from '../shared/config.js'
@@ -198,4 +199,10 @@ test('the reset button restores the default tiles', async () => {
   resetButton.props.onClick()
   assert.equal(world.settings.get('config'), DEFAULT_CONFIG_TEXT)
   assert.equal(tiles().length, 9)
+})
+
+test('the settings page is dark, down to every text and button', () => {
+  assertDark(settingsPage())
+  settingsStorage.setItem('config', 'timer\nnot a line at all =\nCalc = app:1:page/index @nosuchicon')
+  assertDark(settingsPage())
 })

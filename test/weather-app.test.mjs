@@ -18,8 +18,11 @@ import {
   widgetsOf,
   settingsPage,
   settingsText,
+  settingsCards,
+  assertDark,
   nodes,
 } from './support/harness.mjs'
+import { isChosen } from '../shared/settings-ui.js'
 
 // A real Open-Meteo answer for Helsinki (UTC+2): 5-7 degrees, drizzle, windy.
 const sample = JSON.parse(readFileSync(new URL('./fixtures/open-meteo-forecast.json', import.meta.url), 'utf8'))
@@ -55,7 +58,12 @@ const choose = (place) => world.settings.set('place', JSON.stringify(place))
 const forecastFetches = () => world.fetched.filter((url) => url.startsWith('https://api.open-meteo.com/'))
 const chip = () => buttons()[0]
 const rects = (color) => widgetsOf('FILL_RECT').filter((w) => w.params.color === color)
-const placeSection = () => nodes(settingsPage(), 'Section')[0]
+const placeCard = () => settingsCards(settingsPage())[0]
+// The line under the Place title.
+const placeLine = () => settingsText(placeCard())[1]
+const placeButtons = () => nodes(placeCard(), 'Button')
+// The pills for one unit, as [label, value's button] in the Units card.
+const unitButtons = (nth) => nodes(nodes(settingsCards(settingsPage())[1], 'View')[2 * nth + 1], 'Button')
 const search = (text) => nodes(settingsPage(), 'TextInput')[0].props.onChange(text)
 
 let entry
@@ -80,7 +88,7 @@ test('with no place chosen it says where to choose one', async () => {
   assert.deepEqual(texts(), ['Choose a place in the Zepp app: open the Weather app settings there.'])
   assert.deepEqual(world.fetched, [])
   assert.equal(world.statusBarVisible, false)
-  assert.equal(placeSection().props.description, 'No place chosen yet. Search for your town or city.')
+  assert.equal(placeLine(), 'No place chosen yet. Search for your town or city.')
 })
 
 test('a search on the phone picks the best match, and the open watch app shows it', async () => {
@@ -91,7 +99,7 @@ test('a search on the phone picks the best match, and the open watch app shows i
 
   assert.equal(world.settings.get('query'), 'Springfield')
   assert.equal(JSON.parse(world.settings.get('place')).region, 'Missouri, United States')
-  assert.equal(placeSection().props.description, 'The watch shows the weather for Springfield, Missouri, United States.')
+  assert.equal(placeLine(), 'The watch shows the weather for Springfield, Missouri, United States.')
   assert.equal(chip().params.text, 'Springfield, today')
   assert.equal(forecastFetches().length, 1)
   assert.match(forecastFetches()[0], /latitude=37\.2&longitude=-93\.3/)
@@ -103,17 +111,17 @@ test('the other matches are offered as buttons, and choosing one switches the wa
   search('Springfield')
   await flush()
 
-  const offered = () => nodes(settingsPage(), 'Button').map((b) => [b.props.label, b.props.color])
+  const offered = () => placeButtons().map((b) => [b.props.label, isChosen(b)])
   assert.deepEqual(offered(), [
-    ['Springfield, Missouri, United States', 'primary'],
-    ['Springfield, Illinois, United States', 'default'],
+    ['Springfield, Missouri, United States', true],
+    ['Springfield, Illinois, United States', false],
   ])
 
-  nodes(settingsPage(), 'Button')[1].props.onClick()
+  placeButtons()[1].props.onClick()
   await flush()
-  assert.equal(offered()[1][1], 'primary')
-  assert.equal(offered()[0][1], 'default')
-  assert.equal(placeSection().props.description, 'The watch shows the weather for Springfield, Illinois, United States.')
+  assert.equal(offered()[1][1], true)
+  assert.equal(offered()[0][1], false)
+  assert.equal(placeLine(), 'The watch shows the weather for Springfield, Illinois, United States.')
   assert.equal(forecastFetches().length, 2)
   assert.match(forecastFetches()[1], /latitude=39\.8&longitude=-89\.6/)
 })
@@ -125,7 +133,7 @@ test('a search that finds nothing says so and keeps the current place', async ()
   search('Qqqqzz')
   await flush()
   assert.ok(settingsText(settingsPage()).includes('Nothing found for "Qqqqzz". Try the nearest larger town.'))
-  assert.deepEqual(nodes(settingsPage(), 'Button'), [])
+  assert.deepEqual(placeButtons(), [])
   assert.equal(JSON.parse(world.settings.get('place')).name, 'Helsinki')
 })
 
@@ -242,13 +250,14 @@ test('changing the units on the phone refetches in those units', async () => {
   online()
   choose(HELSINKI)
   await open()
-  const [temperature, wind] = nodes(settingsPage(), 'Select')
-  assert.equal(temperature.props.value, 'c')
-  assert.deepEqual(wind.props.options.map((o) => o.value), ['ms', 'kmh', 'mph', 'kn'])
+  const chosen = (nth) => unitButtons(nth).filter(isChosen).map((b) => b.props.label)
+  assert.deepEqual(chosen(0), ['Celsius (°C), rain in mm'])
+  assert.deepEqual(unitButtons(1).map((b) => b.props.label), ['m/s', 'km/h', 'mph', 'knots'])
+  assert.deepEqual(chosen(1), ['m/s'])
 
-  temperature.props.onChange('f')
+  unitButtons(0)[1].props.onClick()
   await flush()
-  wind.props.onChange('mph')
+  unitButtons(1)[2].props.onClick()
   await flush()
 
   assert.equal(forecastFetches().length, 3)
@@ -256,7 +265,8 @@ test('changing the units on the phone refetches in those units', async () => {
   assert.equal(asked.get('temperature_unit'), 'fahrenheit')
   assert.equal(asked.get('precipitation_unit'), 'inch')
   assert.equal(asked.get('wind_speed_unit'), 'mph')
-  assert.equal(nodes(settingsPage(), 'Select')[0].props.value, 'f')
+  assert.deepEqual(chosen(0), ['Fahrenheit (°F), rain in inches'])
+  assert.deepEqual(chosen(1), ['mph'])
   // The numbers are whatever the service answers; the labels follow the units.
   assert.ok(texts().some((text) => text.includes(' mph')))
   assert.ok(texts().some((text) => text.includes(' in,')))
@@ -411,4 +421,17 @@ test('unknown requests from the watch are refused', async () => {
   online()
   await open()
   await assert.rejects(world.page.request({ method: 'NOPE' }), /unknown method/)
+})
+
+test('the settings page is dark, down to every text and button', async () => {
+  assertDark(settingsPage())
+  online()
+  await open()
+  search('Springfield')
+  await flush()
+  assert.equal(placeButtons().length, 2)
+  assertDark(settingsPage())
+  search('Qqqqzz')
+  await flush()
+  assertDark(settingsPage())
 })

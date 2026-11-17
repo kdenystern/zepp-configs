@@ -18,6 +18,8 @@ import {
   samePlace,
 } from '../lib/forecast'
 
+import { page, card, text, note, field, button, choice } from '../../../shared/settings-ui'
+
 const options = (table) => Object.keys(table).map((value) => ({ name: table[value].name, value }))
 
 function searchNote(search, query) {
@@ -38,54 +40,38 @@ AppSettingsPage({
     // Matches belong to the search that produced them.
     const results = search && search.query === query ? readResults(getItem(RESULTS_KEY)) : []
     const units = readUnits(getItem)
-    const note = searchNote(search, query)
+    const searching = searchNote(search, query)
 
-    return View({ style: { padding: '12px 16px' } }, [
-      Section(
-        {
-          title: 'Place',
-          description: place
-            ? `The watch shows the weather for ${placeLabel(place)}.`
-            : 'No place chosen yet. Search for your town or city.',
-        },
+    return page([
+      card(
+        'Place',
+        place ? `The watch shows the weather for ${placeLabel(place)}.` : 'No place chosen yet. Search for your town or city.',
         [
-          TextInput({
+          field({
             label: 'Search for a town or city',
             placeholder: 'For example: Lisbon',
             value: query,
             onChange: (value) => storage.setItem(QUERY_KEY, value.trim()),
           }),
-          ...(note ? [Text({ paragraph: true }, note)] : []),
+          ...(searching ? [text(searching)] : []),
           ...results.map((result) =>
-            Button({
-              label: placeLabel(result),
-              color: samePlace(result, place) ? 'primary' : 'default',
-              style: { marginTop: '8px' },
-              onClick: () => storage.setItem(PLACE_KEY, JSON.stringify(result)),
-            }),
+            View({ style: { marginBottom: '8px' } }, [
+              button(placeLabel(result), () => storage.setItem(PLACE_KEY, JSON.stringify(result)), {
+                chosen: samePlace(result, place),
+              }),
+            ]),
           ),
         ],
       ),
-      Section({ title: 'Units' }, [
-        Select({
-          label: 'Temperature',
-          options: options(TEMP_UNITS),
-          value: units.temp,
-          onChange: (value) => storage.setItem(TEMP_UNIT_KEY, value),
-        }),
-        Select({
-          label: 'Wind speed',
-          options: options(WIND_UNITS),
-          value: units.wind,
-          onChange: (value) => storage.setItem(WIND_UNIT_KEY, value),
-        }),
+      card('Units', '', [
+        choice('Temperature', options(TEMP_UNITS), units.temp, (value) => storage.setItem(TEMP_UNIT_KEY, value)),
+        choice('Wind speed', options(WIND_UNITS), units.wind, (value) => storage.setItem(WIND_UNIT_KEY, value)),
       ]),
-      Section({ title: 'About' }, [
-        Text(
-          { paragraph: true },
+      card('About', '', [
+        note(
           'The watch asks this phone for a fresh forecast whenever the Weather app opens, and keeps the last one for when the phone is away.',
         ),
-        Text({ paragraph: true }, 'Weather data by Open-Meteo.com (CC BY 4.0).'),
+        note('Weather data by Open-Meteo.com (CC BY 4.0).'),
       ]),
     ])
   },

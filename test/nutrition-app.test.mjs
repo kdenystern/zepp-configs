@@ -19,6 +19,7 @@ import {
   settingsStorage,
   settingsText,
   nodes,
+  assertDark,
 } from './support/harness.mjs'
 
 let entry
@@ -266,4 +267,14 @@ test('every control sits within the screen width and buttons do not overlap', ()
   const keypad = check()
   for (const w of keypad) assert.ok(w.params.y + w.params.h <= 450, 'the keypad fits on one screen')
   assert.equal(widgetsOf('BUTTON').length, 12)
+})
+
+test('the settings page is dark, down to every text and button', async () => {
+  assertDark(settingsPage())
+  settingsStorage.setItem('presets', 'Meal = 600, 35\nnonsense')
+  startApp(entry)
+  await flush()
+  tap(button('Meal: 600 kcal, 35 g'))
+  await flush()
+  assertDark(settingsPage())
 })

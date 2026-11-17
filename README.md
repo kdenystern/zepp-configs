@@ -1,14 +1,14 @@
 # Zepp OS watch face and apps for the Amazfit Cheetah (Square)
 
-A watch face and three small apps, installed by sideloading through the Zepp app's
+A watch face and four small apps, installed by sideloading through the Zepp app's
 Developer Mode.
 
 > **Written by AI.** All of this repository, code, tests and documentation, was written
 > by Claude Fable 5.2, an AI model. Keep that in mind before relying on it.
 
-| Launcher Face | Launcher | Nutrition | Weather |
-| --- | --- | --- | --- |
-| ![Watch face](docs/watchface.png) | ![Launcher](docs/launcher.png) | ![Nutrition](docs/nutrition.png) | ![Weather](docs/weather.png) |
+| Launcher Face | Launcher | Nutrition | Weather | Tasks |
+| --- | --- | --- | --- | --- |
+| ![Watch face](docs/watchface.png) | ![Launcher](docs/launcher.png) | ![Nutrition](docs/nutrition.png) | ![Weather](docs/weather.png) | ![Tasks](docs/tasks.png) |
 
 - **Launcher Face**: time, weekday and date, battery ring, steps and heart rate. The
   button in the bottom right corner opens the Launcher.
@@ -18,6 +18,8 @@ Developer Mode.
   one-tap presets and undo.
 - **Weather**: the day on one screen: conditions now, then temperature, rain or snow,
   and wind hour by hour.
+- **Tasks**: today's to-do list. One-off and repeating tasks, added on the phone and
+  checked off on the wrist.
 
 ## Device
 
@@ -37,6 +39,7 @@ npm run qr:watchface          # builds, then prints a QR code
 npm run qr:launcher
 npm run qr:nutrition
 npm run qr:weather
+npm run qr:tasks
 ```
 
 1. **Developer mode.** In the Zepp app: Profile → Settings → About, tap the Zepp icon
@@ -61,6 +64,7 @@ Workout = workout
 Heart rate = hr
 Weather = app:68234:page/index @weather
 Nutrition = app:68232:page/index @food
+Tasks = app:68235:page/index @todo
 Torch = screen:FlashLightScreen @torch
 sleep
 ```
@@ -114,6 +118,34 @@ The phone fetches the forecast from [Open-Meteo](https://open-meteo.com) each ti
 app opens. The watch keeps the last one, so it still works for the rest of the day
 without the phone.
 
+## Tasks
+
+The watch shows what is left for today. Tap a task to check it off; **Undo** at the
+bottom of the screen brings back the last one. A task you do not get to stays on the
+list the next day.
+
+Tasks are added in the Tasks settings in the Zepp app. Tap **Add a task** and type what
+to do; end it with a repeat to make it come back:
+
+```
+Buy milk and star anise
+Take pills every day
+Workout every 3 days
+Bins every Mon and Thu
+Clean the filter every month
+```
+
+- A repeat counts from the day the task was done: a workout due every 3 days and done
+  a day late is next due 3 days after that.
+- `every week`, `every 2 weeks`, `every weekday`, `every year`, `daily` and `weekly` work too.
+- The day changes at 4 in the morning, so a late evening still counts.
+- The settings page also lists today's tasks with a Done button each, every task with
+  the day it is next due, and the one-off tasks already finished. Tap a task there to
+  change it.
+
+The tasks are stored on the phone. The watch keeps a copy, so it works with the phone
+away and passes on what was checked off the next time the app opens within reach.
+
 ## Known issue
 
 Closing a custom app straight back to a watch face can leave the watch face ignoring
@@ -126,12 +158,12 @@ Launcher app and not from tiles on the watch face.
 npm test          # the real code, run against a mock watch and phone
 npm run icons     # regenerate icons and watch face artwork
 npm run screens   # redraw the pictures in docs/
-npm run build     # build all four into apps/*/dist/
+npm run build     # build all five into apps/*/dist/
 ```
 
 ```
-apps/        watchface, launcher, nutrition, weather
-shared/      tile config parser, tile layout, icon table
+apps/        watchface, launcher, nutrition, weather, tasks
+shared/      tile config parser, tile layout, icon table, settings page look
 test/        tests and the mock watch, phone and internet
 tools/       icon and picture generators
 ```

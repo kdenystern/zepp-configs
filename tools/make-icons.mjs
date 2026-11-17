@@ -8,6 +8,7 @@ import { ICON_TABLE } from '../shared/icons.js'
 import { TILE, TILE_RADIUS } from '../shared/layout.js'
 import { FACE, ACCENT } from '../apps/watchface/watchface/layout.js'
 import { SERIES } from '../apps/weather/lib/palette.js'
+import { ROW, ACCENT as TICK } from '../apps/tasks/lib/layout.js'
 
 const images = {} // path relative to the repo -> svg
 
@@ -123,6 +124,29 @@ const CHART_GLYPHS = {
 for (const [name, [phosphor, color]] of Object.entries(CHART_GLYPHS)) {
   images[`${wx}/s-${name}.png`] = glyphSvg(await glyph(phosphor, 'bold'), 22, css(color))
 }
+
+// --- tasks app: one row of the list, drawn over the task's title ---
+
+images['apps/tasks/assets/default.s/icon.png'] = appIcon(
+  '#4263eb',
+  `<g transform="translate(46 46) scale(${156 / 256})" fill="#ffffff">${await glyph('check-square')}</g>`,
+)
+
+// Idle: a ring to tick and a rule underneath, the rest see-through. Pressed:
+// the row lights up and the ring is ticked.
+function rowSvg(pressed) {
+  const { w, h, ring } = ROW
+  const cy = h / 2
+  const tick = `M${ring.cx - 5.5} ${cy + 0.5} l4 4 l7.5 -8.5`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
+  ${pressed ? `<rect width="${w}" height="${h - 2}" rx="14" fill="#ffffff" fill-opacity="0.12"/>` : ''}
+  <rect x="0" y="${h - 1.5}" width="${w}" height="1.5" fill="#2e2e2e"/>
+  <circle cx="${ring.cx}" cy="${cy}" r="${ring.r}" fill="${pressed ? TICK : 'none'}" stroke="${pressed ? TICK : '#8a8a8a'}" stroke-width="2"/>
+  ${pressed ? `<path d="${tick}" fill="none" stroke="#000000" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>` : ''}
+</svg>`
+}
+images['apps/tasks/assets/default.s/row.png'] = rowSvg(false)
+images['apps/tasks/assets/default.s/row_p.png'] = rowSvg(true)
 
 // --- watch face: thin lines only, which is what reads well on this screen ---
 

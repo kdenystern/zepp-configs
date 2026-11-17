@@ -75,5 +75,36 @@ export function nodes(tree, type) {
   return out
 }
 
+// A settings page is made of cards: a View on the page that starts with its
+// title.
+export const settingsCards = (tree) =>
+  tree.children.filter((node) => node.type === 'View' && node.children[0] && node.children[0].type === 'Text')
+export const cardTitle = (card) => card.children[0].children.join('')
+
+// The settings pages are dark, and that only holds if every component is told
+// its own colours: the Zepp app's defaults are dark text on white.
+export function assertDark(tree) {
+  const fail = (message) => {
+    throw new Error('settings page: ' + message)
+  }
+  if (tree.type !== 'View' || tree.props.style.background !== '#121315') fail('the page itself is not dark')
+  for (const type of ['Section', 'Select', 'Toggle']) {
+    if (nodes(tree, type).length) fail(`${type} is used, whose colours cannot be set`)
+  }
+  for (const node of nodes(tree, 'Text')) {
+    if (!node.props.style || !node.props.style.color) fail(`no colour for the text "${node.children.join('')}"`)
+  }
+  for (const node of nodes(tree, 'TextInput')) {
+    if (!node.props.labelStyle || !node.props.labelStyle.color) fail(`no colour for the label "${node.props.label}"`)
+    if ('value' in node.props && !(node.props.subStyle && node.props.subStyle.color)) {
+      fail(`no colour for the value under "${node.props.label}"`)
+    }
+  }
+  for (const node of nodes(tree, 'Button')) {
+    const style = node.props.style || {}
+    if (!style.background || !style.color) fail(`no colours for the button "${node.props.label}"`)
+  }
+}
+
 // All the plain text shown on a settings page, one string per Text node.
 export const settingsText = (tree) => nodes(tree, 'Text').map((node) => node.children.join(''))

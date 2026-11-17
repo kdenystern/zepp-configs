@@ -38,9 +38,44 @@ function drawText(w, { centre }) {
     anchor = 'end'
     tx = x + width
   }
-  // Wrapping is not simulated; text is centred vertically on one line.
-  const ty = y + h / 2 + size * 0.36
-  return `<text x="${tx}" y="${ty}" font-family="DejaVu Sans" font-size="${size}" fill="${hex(color)}" text-anchor="${anchor}">${escape(text)}</text>`
+  // Wrapped text breaks where DejaVu is estimated to run out of room; other
+  // text stays on one line. Either way it is centred vertically.
+  const lines = w.params.text_style === 'WRAP' ? wrap(text, size, width) : [text]
+  const pitch = size * 1.25
+  return lines
+    .map((line, i) => {
+      const ty = y + h / 2 + size * 0.36 + (i - (lines.length - 1) / 2) * pitch
+      return `<text x="${tx}" y="${ty}" font-family="DejaVu Sans" font-size="${size}" fill="${hex(color)}" text-anchor="${anchor}">${escape(line)}</text>`
+    })
+    .join('')
+}
+
+// Rough DejaVu Sans advance widths, in em.
+function textWidth(text, size) {
+  let em = 0
+  for (const c of text) {
+    if ("iljI.,:;'|!".includes(c)) em += 0.3
+    else if (' ftr()-'.includes(c)) em += 0.38
+    else if ('mwMW'.includes(c)) em += 0.92
+    else if (c >= 'A' && c <= 'Z') em += 0.7
+    else em += 0.62
+  }
+  return em * size
+}
+
+function wrap(text, size, width) {
+  const lines = []
+  let line = ''
+  for (const word of String(text).split(' ')) {
+    const longer = line ? line + ' ' + word : word
+    if (line && textWidth(longer, size) > width) {
+      lines.push(line)
+      line = word
+    } else {
+      line = longer
+    }
+  }
+  return lines.concat(line)
 }
 
 function image(src, x, y, w, h) {
@@ -112,6 +147,23 @@ function pngSize(src) {
   return [data.readUInt32BE(16), data.readUInt32BE(20)]
 }
 
+// Everything on the page: its own widgets first, then each VIEW_CONTAINER
+// layer in z order, clipped to its box. `scroll` moves the page and the
+// layers that can scroll.
+function drawPage(scroll) {
+  const own = world.widgets.filter((w) => !w.parent && w.type !== 'VIEW_CONTAINER')
+  const layers = world.widgets
+    .filter((w) => w.type === 'VIEW_CONTAINER')
+    .sort((a, b) => (a.params.z_index || 0) - (b.params.z_index || 0))
+  const layer = (box, i) => {
+    const { x, y, w, h, scroll_enable: scrolls = 1 } = box.params
+    const inside = world.widgets.filter((child) => child.parent === box)
+    return `<clipPath id="layer${i}"><rect x="${x}" y="${y}" width="${w}" height="${h}"/></clipPath>
+    <g clip-path="url(#layer${i})"><g transform="translate(${x} ${y - (scrolls ? scroll : 0)})">${inside.map(drawWidget).join('')}</g></g>`
+  }
+  return `<g transform="translate(0 ${-scroll})">${own.map(drawWidget).join('')}</g>${layers.map(layer).join('')}`
+}
+
 // The current page, scrolled down by `scroll` pixels, clipped to the watch's
 // rounded screen.
 async function snapshot(name, scroll = 0) {
@@ -121,7 +173,7 @@ async function snapshot(name, scroll = 0) {
   <g transform="translate(20 20)">
     <clipPath id="screen"><rect width="${width}" height="${height}" rx="${radius}"/></clipPath>
     <rect width="${width}" height="${height}" rx="${radius}" fill="#000"/>
-    <g clip-path="url(#screen)"><g transform="translate(0 ${-scroll})">${world.widgets.map(drawWidget).join('')}</g></g>
+    <g clip-path="url(#screen)">${drawPage(scroll)}</g>
   </g>
 </svg>`
   const out = join(root, 'docs', name + '.png')
@@ -131,8 +183,8 @@ async function snapshot(name, scroll = 0) {
 }
 
 const app = process.argv[2]
-if (!['watchface', 'launcher', 'nutrition', 'weather'].includes(app)) {
-  console.error('usage: preview.mjs watchface|launcher|nutrition|weather')
+if (!['watchface', 'launcher', 'nutrition', 'weather', 'tasks'].includes(app)) {
+  console.error('usage: preview.mjs watchface|launcher|nutrition|weather|tasks')
   process.exit(1)
 }
 
@@ -175,6 +227,23 @@ if (app === 'watchface') {
   await snapshot('weather')
   tap(world.widgets.find((w) => w.type === 'BUTTON'))
   await snapshot('weather-tomorrow')
+} else if (app === 'tasks') {
+  // Tasks are typed into the settings page on the phone.
+  const { settingsPage, nodes } = await import('../test/support/harness.mjs')
+  const add = (text) => nodes(settingsPage(), 'TextInput')[0].props.onChange(text)
+  ;['Take pills every day', 'Workout every 3 days', 'Buy milk and star anise', 'Water the plants every week', 'Call the dentist'].forEach(add)
+  startApp(entry)
+  await flush()
+  const rows = () => world.widgets.filter((w) => w.type === 'BUTTON' && w.visible && w.params.normal_src)
+  tap(rows()[3])
+  await snapshot('tasks')
+  while (rows().length) tap(rows()[0])
+  await snapshot('tasks-done')
+  // More than a screenful: the list scrolls under Undo.
+  ;['Stretch every day', 'Reply to Anna', 'Charge the watch every 5 days', 'Vitamin D every day', 'Take the bins out every Mon'].forEach(add)
+  const undo = () => world.widgets.find((w) => w.type === 'BUTTON' && w.params.text === 'Undo')
+  for (let i = 0; i < 4; i++) tap(undo())
+  await snapshot('tasks-long', 150)
 } else {
   startApp(entry)
   await flush()

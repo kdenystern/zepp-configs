@@ -3,21 +3,23 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "description": "Zepp OS watch face and mini apps for the Amazfit Cheetah (Square): an app-launcher watch face and a calorie/protein tracker",
+  "description": "Zepp OS watch face and mini apps for the Amazfit Cheetah (Square): an app-launcher watch face, a calorie/protein tracker, a weather app and a daily task list",
   "type": "module",
   "workspaces": [
     "apps/*"
   ],
   "scripts": {
-    "build": "npm run build:watchface && npm run build:launcher && npm run build:nutrition && npm run build:weather",
+    "build": "npm run build:watchface && npm run build:launcher && npm run build:nutrition && npm run build:weather && npm run build:tasks",
     "build:weather": "cd apps/weather && zeus build",
+    "build:tasks": "cd apps/tasks && zeus build",
+    "qr:tasks": "cd apps/tasks && zeus preview",
     "qr:weather": "cd apps/weather && zeus preview",
     "build:launcher": "cd apps/launcher && zeus build",
     "build:nutrition": "cd apps/nutrition && zeus build",
     "qr:launcher": "cd apps/launcher && zeus preview",
     "qr:nutrition": "cd apps/nutrition && zeus preview",
     "test": "node --import ./test/support/register.mjs --test \"test/*.test.mjs\"",
-    "screens": "node --import ./test/support/register.mjs tools/preview.mjs watchface && node --import ./test/support/register.mjs tools/preview.mjs launcher && node --import ./test/support/register.mjs tools/preview.mjs nutrition && node --import ./test/support/register.mjs tools/preview.mjs weather",
+    "screens": "node --import ./test/support/register.mjs tools/preview.mjs watchface && node --import ./test/support/register.mjs tools/preview.mjs launcher && node --import ./test/support/register.mjs tools/preview.mjs nutrition && node --import ./test/support/register.mjs tools/preview.mjs weather && node --import ./test/support/register.mjs tools/preview.mjs tasks",
     "icons": "node tools/make-icons.mjs",
     "build:watchface": "cd apps/watchface && zeus build",
     "qr:watchface": "cd apps/watchface && zeus preview"

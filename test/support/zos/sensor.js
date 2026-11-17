@@ -22,4 +22,7 @@ export class Time {
   getDate() {
     return world.now.getDate()
   }
+  getHours() {
+    return world.now.getHours()
+  }
 }
