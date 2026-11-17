@@ -40,7 +40,7 @@ session needs to know.
 | `apps/tasks` | Tasks: today's to-do list, one-off and repeating, checked off on the watch | 68235 |
 | `shared/` | `config.js` (text config parser), `layout.js` (tile grid), `icons.js` (icon table), `tiles.js` (draw and launch tiles), `settings-ui.js` (the dark look of every settings page) | |
 | `test/support/` | Mock watch, phone, BLE link and internet | |
-| `test/fixtures/` | A real Open-Meteo forecast answer (Helsinki), used by weather tests and previews | |
+| `test/fixtures/` | Real Open-Meteo forecast and ensemble answers (Helsinki, same days), used by weather tests and previews | |
 | `tools/` | `make-icons.mjs`, `preview.mjs`, `settings-html.mjs`, `sharp.mjs` | |
 
 The app ids are arbitrary sideload ids. `68231` is `LAUNCHER_APP_ID` in
@@ -59,13 +59,26 @@ from. The always-on display (`SCENE_AOD`) gets the time only.
 
 **Weather.** One page. Header chip (a `BUTTON`: place and day, tap flips today/tomorrow),
 current conditions, then three charts on one 24-hour axis: temperature line, rain/snow
-bars, wind line with gust dashes. The rain chart is the big one in the middle (user,
-2026-11-17: temperature barely moves over a day, rain matters): bars on a scale from 0
-to a round amount (1, 2, 5... mm; labelled in the left margin, `rainScale`), at least
-4 px for any rain, past hours dimmed only to 60%. Over the bars, the hourly chance of
-rain as a 2 px step line (`stepRects`, 0 to 100%), and a "%" label above each hour where
-rain becomes likely from now on (`chanceMarks`: on at 50%, off below 30%). The user
-asked for the percentages where rain is likely to begin; the step line is my addition. The charts are built **only from `FILL_RECT`s**
+bars, wind line with gust dashes. 13 px an hour, plot from x 39 to 351. The rain chart
+is the big one in the middle (user, 2026-11-17: temperature barely moves over a day,
+rain matters):
+- Bars: rain expected per hour (mm), from 0 to a round amount (1, 2, 5... mm,
+  `rainScale`) marked in the **right** margin in the bar colour; at least 4 px, none
+  under `TRACE` (0.05 mm); past hours dimmed to 60%.
+- Over them, the chance of rain per hour as a 2 px step line (`stepRects`), its 0% and
+  100% marked in the **left** margin in the line's colour. The user insisted the left
+  scale be 0% to 100% (a "0 to 2" there confused them). A "%" label above each hour
+  where rain becomes likely from now on (`chanceMarks`: on at 50%, off below 30%).
+- Caption: today it is the current hour ("Now 0.3 mm/h, 84%"), not the day total,
+  which the user does not care about; tomorrow it is "Total 6.7 mm, up to 100%".
+- **Rain and chance come from the Open-Meteo ensemble API**, not the forecast API
+  (user complaint 2026-11-17: hours with rain and no bar). The forecast's
+  `precipitation` is one model run and its `precipitation_probability` comes from
+  other ensembles, so they disagree: the Helsinki fixture has 0.0 mm at 82-100% for
+  five hours. The side service fetches both in parallel; `readEnsemble` turns the 40
+  `icon_seamless` runs into the average amount and the share of runs with at least
+  0.1 mm, matched to the forecast's hours by timestamp. Without the ensemble (failed
+  fetch, or an hour most runs lack) the forecast's own figures are used. The charts are built **only from `FILL_RECT`s**
 (`lib/chart.js` turns data into rectangles; a "line" is 3 px columns, merged where
 flat), because that is the drawing primitive already proven on the watch and the mock
 preview draws it exactly. `CANVAS` (API 3.0) and `GRADKIENT_POLYLINE` exist in the docs
@@ -169,12 +182,10 @@ Nutrition app fixed it. Treat it as a firmware bug to design around:
 - Launcher scrolling with more than nine tiles.
 - Whether phone config sync works (the user has not said), and `name:` / `screen:`
   targets.
-- The Weather app: the user has installed it and runs it (2026-11-17, complaining about
-  the rain chart: "doesn't start at actual 0", an hour of 0.8 mm "not displayed at all,
-  even as a small blue bar", no chance shown later in the day). So the side service's
-  `fetch` works. The 0.8 mm report is not reproduced by the mock; likely causes in that
-  build were past bars dimmed to 45% and a 3 px minimum on a 46 px chart. Still unseen
-  since the redesign that followed. Not reported on: whether the side
+- The Weather app: the user has installed it and runs it (2026-11-17, complaining that
+  the rain chart had hours with rain but no bar, and no chance shown through the day).
+  So the side service's `fetch` to Open-Meteo works. The ensemble request and the
+  redesigned rain chart are unseen on the phone and watch. Not reported on: whether the side
   service is started by a settings change while the watch app is closed (ZML has code
   for it; if not, the watch's first request does the place lookup instead),
   `Time.getTime()`, and how wide the texts come out in the watch's own font (the
@@ -267,6 +278,14 @@ others. No permission is needed for it. ZML's watch-side `this.request` waits up
 service: a `setItem` on either side fires the service's `onSettingsChange` and redraws
 the settings page. Neither the phone nor the side service exposes the phone's location;
 the watch has a `Geolocation` sensor (GPS, slow), unused here.
+
+**Open-Meteo ensemble.** `ensemble-api.open-meteo.com/v1/ensemble`, same place, time
+and unit parameters as the forecast. `hourly=precipitation` returns the control run as
+`precipitation` and the rest as `precipitation_member01`..`39` for `icon_seamless` (40
+runs, about 35 KB for 3 days of rain and snow). ICON is hourly for the first two days,
+then 3-hourly; GFS (`gfs025`) and ECMWF (`ecmwf_ifs025`) ensembles are 3-hourly
+throughout. Inches come with three decimals. `start_date`/`end_date` reach back a few
+days, which is how the fixture matches the forecast fixture's days.
 
 **Open-Meteo.** `timezone=auto&timeformat=unixtime` makes `hourly.time[0]` the place's
 local midnight as a UTC timestamp, with `utc_offset_seconds` alongside. Hourly

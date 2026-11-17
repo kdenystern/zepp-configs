@@ -21,6 +21,8 @@ import {
   rainCaption,
   rainScale,
   chanceMarks,
+  TEMP_UNITS,
+  TRACE,
   windCaption,
   clock,
 } from '../lib/forecast'
@@ -31,14 +33,19 @@ const storage = new LocalStorage()
 
 const WIDTH = 390
 
-// The charts share one time axis: 24 hours, 14 px each.
-const PLOT_X = 27
-const PLOT_W = 336
+// The header keeps this far from the sides of the screen.
+const SIDE = 27
+// The charts share one time axis: 24 hours, 13 px each. The margins either
+// side hold the rain chart's scales.
+const HOUR = 13
+const PLOT_X = 39
+const PLOT_W = 24 * HOUR
 // Rain gets the most room: temperature barely moves over a day.
 const TEMP = { x: PLOT_X, y: 152, w: PLOT_W, h: 36 }
 // The temperature line keeps clear of its chart's top edge and baseline.
 const TEMP_LINE = { x: PLOT_X, y: TEMP.y + 4, w: PLOT_W, h: TEMP.h - 8 }
-// The rain chart: a strip for the chance labels, then the bars under it.
+// The rain chart: a strip for the chance labels, then the bars and the chance
+// line under it. Chance (0-100%) is marked on the left, rain (mm) on the right.
 const RAIN = { x: PLOT_X, y: 222, w: PLOT_W, h: 96 }
 const CHANCE_LABELS = { y: RAIN.y, h: 18 }
 const RAIN_BARS = { x: PLOT_X, y: RAIN.y + 20, w: PLOT_W, h: RAIN.h - 20 }
@@ -243,7 +250,7 @@ Page(
       this.caption(WIND, 'wind', windCaption(view, units))
       dashRects(view.gust, WIND, windScale).forEach((r, hour) => {
         // Gusts barely above the wind speed would only smudge the line.
-        if (r.y + r.h + 3 > lineY(view.wind, WIND, windScale, (hour + 0.5) * 14)) return
+        if (r.y + r.h + 3 > lineY(view.wind, WIND, windScale, (hour + 0.5) * HOUR)) return
         const past = nowX !== null && r.x - PLOT_X + r.w <= nowX
         this.rect(r, dim(COLOR.wind, past ? 0.3 : 0.6))
       })
@@ -259,27 +266,31 @@ Page(
       }
 
       ;[0, 6, 12, 18, 24].forEach((hour) => {
-        this.text(PLOT_X + hour * 14 - 20, AXIS_Y, 40, 22, String(hour), 17, COLOR.dim, align.CENTER_H)
+        this.text(PLOT_X + hour * HOUR - 20, AXIS_Y, 40, 22, String(hour), 17, COLOR.dim, align.CENTER_H)
       })
 
       this.state.status = this.text(STATUS.x, STATUS.y, STATUS.w, STATUS.h, '', 16, COLOR.dim, align.CENTER_H)
       this.showStatus()
     },
 
-    // Rain and snow: a bar per hour on a scale from zero, marked in the left
-    // margin. Over the bars, a line for the chance of rain or snow (0 to 100%),
-    // labelled where rain becomes likely.
+    // Rain and snow: a bar per hour for the amount expected in it, on a scale
+    // from zero marked in the right margin. Over the bars, a line for the
+    // chance of rain or snow, 0 to 100% as marked in the left margin, labelled
+    // where rain becomes likely.
     drawRain(view, units, nowX) {
       const wet = rainCaption(view, units)
       this.caption(RAIN, wet.icon, wet.text)
 
       const scale = rainScale(view, units)
       const box = RAIN_BARS
+      const right = box.x + box.w + 3
       this.rect({ x: box.x, y: box.y, w: box.w, h: 1 }, COLOR.grid)
-      this.text(0, box.y - 9, PLOT_X - 4, 18, scale.label, 15, COLOR.dim, align.RIGHT)
-      this.text(0, box.y + box.h - 9, PLOT_X - 4, 18, '0', 15, COLOR.dim, align.RIGHT)
+      this.text(0, box.y - 9, PLOT_X - 3, 18, '100%', 14, COLOR.chance, align.RIGHT)
+      this.text(0, box.y + box.h - 9, PLOT_X - 3, 18, '0%', 14, COLOR.chance, align.RIGHT)
+      this.text(right, box.y - 9, WIDTH - right, 18, scale.label, 14, COLOR.rain)
+      this.text(right, box.y + 8, WIDTH - right, 18, TEMP_UNITS[units.temp].rain, 14, COLOR.rain)
 
-      barRects(view.rain, box, { max: scale.max }).forEach((r, hour) => {
+      barRects(view.rain, box, { max: scale.max, least: TRACE[units.temp] }).forEach((r, hour) => {
         if (!r) return
         const color = view.snowy[hour] ? COLOR.snow : COLOR.rain
         const past = nowX !== null && r.x - PLOT_X + r.w <= nowX
@@ -287,7 +298,7 @@ Page(
       })
 
       stepRects(view.prob, box, { lo: 0, hi: 100, splitAt: nowX }).forEach((r) =>
-        this.rect(r, r.before ? dim(COLOR.chance, PAST) : COLOR.chance),
+        this.rect(r, r.before ? dim(COLOR.chance, PAST_BARS) : COLOR.chance),
       )
 
       // A label over each hour where rain becomes likely, from now on, kept
@@ -296,9 +307,9 @@ Page(
       const w = 44
       let free = PLOT_X - 4
       chanceMarks(view.prob, from).forEach((hour) => {
-        const x = Math.min(WIDTH - w, Math.max(free, Math.round(PLOT_X + (hour + 0.5) * 14 - w / 2)))
+        const x = Math.min(WIDTH - w, Math.max(free, Math.round(PLOT_X + (hour + 0.5) * HOUR - w / 2)))
         // No room: pushed off its hour by the label before, or into it at the edge.
-        if (x > PLOT_X + (hour + 1) * 14 || x < free) return
+        if (x > PLOT_X + (hour + 1) * HOUR || x < free) return
         free = x + w
         const label = `${Math.round(view.prob[hour])}%`
         this.text(x, CHANCE_LABELS.y, w, CHANCE_LABELS.h, label, 16, COLOR.chance, align.CENTER_H)
@@ -324,7 +335,7 @@ Page(
 
       const head = view.head
       const sky = condition(head.code, head.isDay)
-      this.add(widget.IMG, { x: PLOT_X, y: 56, src: `wx/${sky.icon}.png` })
+      this.add(widget.IMG, { x: SIDE, y: 56, src: `wx/${sky.icon}.png` })
       // Four characters ("-12°", "100°") need smaller type to stay clear of
       // the text on the right.
       const big = degrees(head.temp)
@@ -333,7 +344,7 @@ Page(
       let second = ''
       if (view.tomorrow) second = `Low ${degrees(view.summary.tempMin)}`
       else if (head.feels !== undefined) second = `Feels ${degrees(head.feels)}`
-      const column = { x: 206, w: PLOT_X + PLOT_W - 206 }
+      const column = { x: 206, w: WIDTH - SIDE - 206 }
       this.text(column.x, second ? 58 : 72, column.w, 28, sky.text, 22, COLOR.text, align.RIGHT)
       if (second) this.text(column.x, 88, column.w, 26, second, 20, COLOR.dim, align.RIGHT)
     },
@@ -343,7 +354,7 @@ Page(
     drawGrid(nowX) {
       ;[TEMP, RAIN_BARS, WIND].forEach((box) => {
         ;[6, 12, 18].forEach((hour) => {
-          this.rect({ x: box.x + hour * 14, y: box.y, w: 1, h: box.h }, COLOR.grid)
+          this.rect({ x: box.x + hour * HOUR, y: box.y, w: 1, h: box.h }, COLOR.grid)
         })
         this.rect({ x: box.x, y: box.y + box.h, w: box.w, h: 1 }, COLOR.baseline)
         if (nowX !== null) this.rect({ x: box.x + nowX - 1, y: box.y, w: 2, h: box.h }, COLOR.now)
@@ -353,7 +364,7 @@ Page(
     // A small icon in the chart's colour, then the day's figures in plain text.
     caption(box, icon, text) {
       this.add(widget.IMG, { x: box.x, y: box.y - 27, src: `wx/s-${icon}.png` })
-      this.text(box.x + 30, box.y - 29, box.w - 30, 26, text, 20, COLOR.soft)
+      this.text(box.x + 30, box.y - 29, WIDTH - SIDE - box.x - 30, 26, text, 20, COLOR.soft)
     },
 
     showStatus() {

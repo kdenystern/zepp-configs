@@ -15,6 +15,7 @@ import {
   searchUrl,
   parsePlaces,
   forecastUrl,
+  ensembleUrl,
   compactForecast,
 } from '../lib/forecast'
 
@@ -107,10 +108,13 @@ AppSideService(
       })
     },
 
+    // The forecast, with rain from the ensemble. Without the ensemble the
+    // forecast's own rain figures are used.
     forecast(place) {
       const units = readUnits(getItem)
-      return this.getJson(forecastUrl(place, units)).then((body) => {
-        const weather = compactForecast(body, place, units, Math.floor(Date.now() / 1000))
+      const ensemble = this.getJson(ensembleUrl(place, units)).catch(() => null)
+      return Promise.all([this.getJson(forecastUrl(place, units)), ensemble]).then(([body, runs]) => {
+        const weather = compactForecast(body, place, units, Math.floor(Date.now() / 1000), runs)
         return weather ? { weather } : { error: 'network' }
       })
     },

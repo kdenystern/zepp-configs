@@ -56,13 +56,13 @@ export function lineRects(values, box, { lo, hi, step = 3, thickness = 3, splitA
 export const lineY = (values, box, scale, px) => topAt(values, box, scale)(px)
 
 // One bar per value, standing on the bottom of the box, on a scale from zero
-// to `max`. Values of zero get no bar; anything above zero is at least `minH`
+// to `max`. Values under `least` get no bar; the rest are at least `minH`
 // tall so a trace still shows. Returns a list as long as `values`, with null
 // where there is no bar.
-export function barRects(values, box, { max, gap = 4, minH = 4 }) {
+export function barRects(values, box, { max, least = Number.MIN_VALUE, gap = 4, minH = 4 }) {
   const slot = box.w / values.length
   return values.map((value, i) => {
-    if (!(value > 0)) return null
+    if (!(value >= least)) return null
     const h = Math.max(minH, Math.min(box.h, Math.round((value / max) * box.h)))
     return { x: Math.round(box.x + i * slot + gap / 2), y: box.y + box.h - h, w: Math.round(slot - gap), h }
   })

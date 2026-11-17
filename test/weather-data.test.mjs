@@ -23,6 +23,8 @@ import {
   rainCaption,
   rainScale,
   chanceMarks,
+  ensembleUrl,
+  readEnsemble,
   windCaption,
   clock,
   HOURS,
@@ -36,7 +38,10 @@ const HELSINKI = { name: 'Helsinki', region: 'Uusimaa, Finland', lat: 60.17, lon
 const METRIC = { temp: 'c', wind: 'ms' }
 const hours = (n) => START + n * 3600
 
-const compact = (body = sample, at = hours(20)) => compactForecast(body, HELSINKI, METRIC, at)
+// The ensemble's answer for the same place and days.
+const runs = JSON.parse(readFileSync(new URL('./fixtures/open-meteo-ensemble.json', import.meta.url), 'utf8'))
+
+const compact = (body = sample, at = hours(20), ensemble) => compactForecast(body, HELSINKI, METRIC, at, ensemble)
 
 // A forecast whose hourly series can be set by hand.
 function made(overrides = {}, units = METRIC) {
@@ -304,20 +309,39 @@ test('temperatures are whole degrees, never minus zero', () => {
 test('captions sum up each chart', () => {
   const view = dayView(compact(), hours(20.2), false)
   assert.equal(tempCaption(view), '5° to 7°')
-  assert.deepEqual(rainCaption(view, METRIC), { icon: 'drop', text: '6.5 mm, 100%' })
+  // The forecast's own figures for 20:00 to 21:00; the ensemble's when it is there.
+  assert.deepEqual(rainCaption(view, METRIC), { icon: 'drop', text: 'Now 0.1 mm/h, 92%' })
+  const withRuns = dayView(compact(sample, hours(20), runs), hours(20.2), false)
+  assert.deepEqual(rainCaption(withRuns, METRIC), { icon: 'drop', text: 'Now 1.0 mm/h, 100%' })
   assert.equal(windCaption(view, METRIC), 'S, 8 to 12 m/s, gusts 19')
 })
 
-test('the rain caption covers dry days, snow, both, and traces', () => {
-  const caption = (overrides, units = METRIC) => rainCaption(dayView(made(overrides, units), hours(1), false), units)
-  const one = (index, value) => Object.assign(Array(HOURS).fill(0), { [index]: value })
-  assert.deepEqual(caption({}), { icon: 'drop', text: 'Dry' })
-  assert.deepEqual(caption({ prob: one(4, 30) }), { icon: 'drop', text: 'Dry, 30%' })
-  assert.deepEqual(caption({ rain: one(4, 2), snow: one(4, 2.8) }), { icon: 'snow', text: '2.8 cm snow' })
-  const mixed = { rain: Object.assign(one(4, 2), { 6: 1.5 }), snow: one(4, 2.8), prob: one(4, 80) }
-  assert.deepEqual(caption(mixed), { icon: 'drop', text: '1.5 mm rain, 2.8 cm snow, 80%' })
-  assert.deepEqual(caption({ rain: one(4, 0.04) }), { icon: 'drop', text: '<0.1 mm' })
-  assert.deepEqual(caption({ rain: one(4, 0.25) }, { temp: 'f', wind: 'mph' }), { icon: 'drop', text: '0.25 in' })
+// Series with one value set: index 2 is 01:00 to 02:00 today, 30 is 05:00 to
+// 06:00 tomorrow.
+const one = (index, value) => Object.assign(Array(HOURS).fill(0), { [index]: value })
+
+test("today's rain caption is about the hour now", () => {
+  const now = (overrides, units = METRIC) => rainCaption(dayView(made(overrides, units), hours(1.5), false), units)
+  assert.deepEqual(now({}), { icon: 'drop', text: 'Now dry' })
+  assert.deepEqual(now({ prob: one(2, 30) }), { icon: 'drop', text: 'Now dry, 30%' })
+  assert.deepEqual(now({ rain: one(2, 0.3), prob: one(2, 84) }), { icon: 'drop', text: 'Now 0.3 mm/h, 84%' })
+  assert.deepEqual(now({ rain: one(2, 0.04) }), { icon: 'drop', text: 'Now dry' }) // too little to show
+  assert.deepEqual(now({ rain: one(2, 0.06) }), { icon: 'drop', text: 'Now 0.1 mm/h' })
+  assert.deepEqual(now({ rain: one(2, 2), snow: one(2, 2.8) }), { icon: 'snow', text: 'Now 2.8 cm/h snow' })
+  assert.deepEqual(now({ rain: one(2, 0.25) }, { temp: 'f', wind: 'mph' }), { icon: 'drop', text: 'Now 0.25 in/h' })
+  // Rain later in the day is the chart's business, not the caption's.
+  assert.deepEqual(now({ rain: one(10, 3), prob: one(10, 90) }), { icon: 'drop', text: 'Now dry' })
+})
+
+test("tomorrow's rain caption is the day's total and its highest chance", () => {
+  const day = (overrides) => rainCaption(dayView(made(overrides), hours(1), true), METRIC)
+  assert.deepEqual(day({}), { icon: 'drop', text: 'Dry' })
+  assert.deepEqual(day({ prob: one(30, 30) }), { icon: 'drop', text: 'Dry, up to 30%' })
+  const wet = { rain: Object.assign(one(30, 2), { 31: 1.5 }), prob: one(30, 80) }
+  assert.deepEqual(day(wet), { icon: 'drop', text: 'Total 3.5 mm, up to 80%' })
+  assert.deepEqual(day({ rain: one(30, 2), snow: one(30, 2.8) }), { icon: 'snow', text: 'Total 2.8 cm snow' })
+  const mixed = { rain: Object.assign(one(30, 2), { 32: 1.5 }), snow: one(30, 2.8), prob: one(30, 80) }
+  assert.deepEqual(day(mixed), { icon: 'drop', text: '1.5 mm, 2.8 cm snow' })
 })
 
 test('the rain scale starts at zero and tops out at a round amount', () => {
@@ -361,6 +385,61 @@ test('clock times are shown at the place, not in UTC', () => {
   assert.equal(clock(START, 7200), '00:00')
   assert.equal(clock(hours(13.6), 7200), '13:36')
   assert.equal(clock(0, -5 * 3600), '19:00')
+})
+
+// --- the ensemble ---
+
+test('the ensemble is asked for rain and snow from every ICON run, in the chosen unit', () => {
+  const url = new URL(ensembleUrl(HELSINKI, { temp: 'f', wind: 'kn' }))
+  assert.equal(url.hostname, 'ensemble-api.open-meteo.com')
+  assert.equal(url.searchParams.get('hourly'), 'precipitation,snowfall')
+  assert.equal(url.searchParams.get('models'), 'icon_seamless')
+  assert.equal(url.searchParams.get('precipitation_unit'), 'inch')
+  assert.equal(url.searchParams.get('timeformat'), 'unixtime')
+})
+
+test("an hour's rain is the average over the runs, its chance the share of runs with rain", () => {
+  const body = {
+    hourly: {
+      time: [hours(-1), hours(0), hours(1), hours(2)],
+      precipitation: [9, 0.0, 0.4, null],
+      precipitation_member01: [9, 0.2, 0.0, null],
+      precipitation_member02: [9, 0.0, 0.2, 1],
+      precipitation_member03: [9, 0.0, 0.2, null],
+      snowfall: [0, 0, 0.7, 0],
+      snowfall_member01: [0, 0, 0, 0],
+      snowfall_member02: [0, 0, 0.7, 0],
+      snowfall_member03: [0, 0, 0.7, 0],
+    },
+  }
+  const [first, second, third, fourth] = readEnsemble(body, hours(0), 4, METRIC)
+  assert.deepEqual(first, { rain: 0.05, snow: 0, prob: 25 })
+  assert.equal(second.prob, 75)
+  assert.ok(Math.abs(second.rain - 0.2) < 1e-9)
+  assert.ok(Math.abs(second.snow - 0.525) < 1e-9)
+  // Fewer than half the runs, or past the end: nothing for that hour.
+  assert.equal(third, null)
+  assert.equal(fourth, null)
+  // In inches, 0.004 is the least that counts as rain.
+  const inches = { hourly: { time: [hours(0)], precipitation: [0.004], precipitation_member01: [0.003] } }
+  assert.equal(readEnsemble(inches, hours(0), 1, { temp: 'f', wind: 'mph' })[0].prob, 50)
+  assert.equal(readEnsemble({ hourly: { time: [] } }, hours(0), 1, METRIC), null)
+  assert.equal(readEnsemble(null, hours(0), 1, METRIC), null)
+})
+
+test('the compact forecast takes rain from the ensemble, and keeps its own where the ensemble has a gap', () => {
+  const plain = compact()
+  const mixed = compact(sample, hours(20), runs)
+  assert.deepEqual(mixed.h.t, plain.h.t)
+  assert.deepEqual(mixed.h.code, plain.h.code)
+  // 12:00 to 13:00: 0.0 mm at 93% in the forecast, 0.2 mm at 78% in the ensemble.
+  assert.deepEqual([plain.h.rain[13], plain.h.prob[13]], [0, 93])
+  assert.deepEqual([mixed.h.rain[13], mixed.h.prob[13]], [0.205, 78])
+  const holed = structuredClone(runs)
+  for (const key of Object.keys(holed.hourly)) if (key !== 'time') holed.hourly[key][13] = null
+  const patched = compact(sample, hours(20), holed)
+  assert.deepEqual([patched.h.rain[13], patched.h.prob[13]], [0, 93])
+  assert.equal(patched.h.rain[14], mixed.h.rain[14])
 })
 
 // --- chart geometry ---
@@ -420,6 +499,8 @@ test('bars stand on the baseline, and a trace still shows', () => {
   assert.equal(bars[0], null)
   assert.deepEqual(bars[2], { x: 57, y: 223, w: 10, h: 23 })
   assert.equal(bars[3].h, 4)
+  // Under `least`, no bar.
+  assert.equal(barRects([0.04, 0.05], { x: 0, y: 0, w: 28, h: 46 }, { max: 2, least: 0.05 })[0], null)
   assert.equal(bars[4].h, 46) // clipped to the box
   bars.filter(Boolean).forEach((b) => assert.equal(b.y + b.h, 246))
 })

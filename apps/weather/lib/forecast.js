@@ -124,7 +124,8 @@ export function forecastUrl(p, units) {
   )
 }
 
-const round = (value) => Math.round(value * 100) / 100
+// Three decimals: amounts in inches come as 0.004 and the like.
+const round = (value) => Math.round(value * 1000) / 1000
 
 // A gap in the data repeats the hour before it.
 function series(values, length) {
@@ -135,9 +136,72 @@ function series(values, length) {
   return out
 }
 
+// Rain and snow come from an ensemble: the same weather model run 40 times
+// over with slightly different starting points. An hour's amount is the
+// average over the runs and its chance is the share of runs with any rain, so
+// the bars and the chance agree. (The forecast's own amount is one model run
+// and its chance comes from other runs, so an hour could be 90% likely and
+// show no rain at all.) ICON is hourly, finest over Europe, and global.
+export const ENSEMBLE_MODEL = 'icon_seamless'
+
+export function ensembleUrl(p, units) {
+  return (
+    'https://ensemble-api.open-meteo.com/v1/ensemble' +
+    `?latitude=${p.lat}&longitude=${p.lon}` +
+    `&hourly=precipitation,snowfall&models=${ENSEMBLE_MODEL}` +
+    '&timezone=auto&timeformat=unixtime&forecast_days=3' +
+    `&precipitation_unit=${TEMP_UNITS[units.temp].rainApi}`
+  )
+}
+
+// The least a run must bring in an hour to count as rain: 0.1 mm, the
+// smallest amount the forecast reports. The ensemble rounds inches to 0.001.
+const WET = { mm: 0.1, inch: 0.004 }
+
+// The runs of one variable: `name` is the control run, `name_member01` and on
+// the others.
+const runsOf = (hourly, name) =>
+  Object.keys(hourly)
+    .filter((key) => key === name || key.indexOf(name + '_member') === 0)
+    .map((key) => hourly[key])
+    .filter(Array.isArray)
+
+const average = (values) => values.reduce((total, value) => total + value, 0) / values.length
+
+// For each of `length` hours from `start`: the average rain and snow over the
+// runs and the share of runs with rain (0-100), or null where the ensemble has
+// nothing for that hour.
+export function readEnsemble(body, start, length, units) {
+  const hourly = body && body.hourly
+  if (!hourly || !Array.isArray(hourly.time)) return null
+  const rainRuns = runsOf(hourly, 'precipitation')
+  const snowRuns = runsOf(hourly, 'snowfall')
+  if (!rainRuns.length) return null
+  const wet = WET[TEMP_UNITS[units.temp].rainApi]
+  const hours = []
+  for (let i = 0; i < length; i++) {
+    const j = hourly.time.indexOf(start + i * 3600)
+    const rain = j < 0 ? [] : rainRuns.map((run) => run[j]).filter(isNumber)
+    // Only an hour that most runs cover is used.
+    if (rain.length * 2 <= rainRuns.length) {
+      hours.push(null)
+      continue
+    }
+    const snow = j < 0 ? [] : snowRuns.map((run) => run[j]).filter(isNumber)
+    hours.push({
+      rain: average(rain),
+      snow: snow.length ? average(snow) : 0,
+      prob: (100 * rain.filter((amount) => amount >= wet).length) / rain.length,
+    })
+  }
+  return hours.some(Boolean) ? hours : null
+}
+
 // Shrinks an Open-Meteo response to what the watch draws. Returns null if the
 // response is not a usable forecast. `at` is when it was fetched, in seconds.
-export function compactForecast(body, p, units, at) {
+// With an `ensemble` response, rain, snow and their chance come from that;
+// any hour it lacks keeps the forecast's own figures.
+export function compactForecast(body, p, units, at, ensemble) {
   const hourly = body && body.hourly
   const now = body && body.current
   if (!hourly || !now || !Array.isArray(hourly.time) || !isNumber(body.utc_offset_seconds)) return null
@@ -148,6 +212,15 @@ export function compactForecast(body, p, units, at) {
   for (const [short, long] of HOURLY) {
     if (!Array.isArray(hourly[long])) return null
     h[short] = series(hourly[long], length)
+  }
+  const runs = readEnsemble(ensemble, hourly.time[0], length, units)
+  if (runs) {
+    runs.forEach((hour, i) => {
+      if (!hour) return
+      h.rain[i] = round(hour.rain)
+      h.snow[i] = round(hour.snow)
+      h.prob[i] = Math.round(hour.prob)
+    })
   }
   return normaliseForecast({
     v: 1,
@@ -277,7 +350,7 @@ const sum = (values) => values.reduce((total, value) => total + value, 0)
 //
 // Returns null when the forecast does not cover that day. Otherwise:
 //   temp, wind  25 points, 00:00 to 24:00 (readings at each full hour)
-//   rain, gust, snowy, prob  24 slots, one per hour (totals over that hour;
+//   rain, snow, gust, snowy, prob  24 slots, one per hour (totals over that hour;
 //               prob is the chance of rain or snow in that hour, 0-100)
 //   nowHour     position of "now" in the day, 0-24, or null for tomorrow
 export function dayView(forecast, now, tomorrow) {
@@ -310,6 +383,7 @@ export function dayView(forecast, now, tomorrow) {
     temp,
     wind,
     rain,
+    snow,
     gust,
     snowy,
     prob,
@@ -392,16 +466,38 @@ export function tempCaption(view) {
   return `${degrees(view.summary.tempMin)} to ${degrees(view.summary.tempMax)}`
 }
 
-// icon: 'drop' or 'snow', whichever there is more of.
+// The least rain an hour must expect to get a bar or to count as wet: what
+// rounds to 0.1 mm (or 0.01 in).
+export const TRACE = { c: 0.05, f: 0.005 }
+
+// Today: the rain or snow expected this hour and its chance ("Now 0.3 mm/h,
+// 84%"). Tomorrow: the day's total and its highest chance. icon: 'drop' or
+// 'snow'.
 export function rainCaption(view, units) {
-  const { rain, snow, prob } = view.summary
   const unit = TEMP_UNITS[units.temp]
-  const parts = []
-  if (rain > 0) parts.push(amount(rain, unit.rain) + (snow > 0 ? ' rain' : ''))
-  if (snow > 0) parts.push(amount(snow, unit.snow) + ' snow')
-  if (!parts.length) parts.push('Dry')
-  if (prob >= 5) parts.push(`${whole(prob)}%`)
-  return { icon: snow > 0 && !(rain > 0) ? 'snow' : 'drop', text: parts.join(', ') }
+  const trace = TRACE[units.temp]
+  const chance = (prob, words) => (prob >= 5 ? `, ${words}${whole(prob)}%` : '')
+
+  if (view.nowHour !== null) {
+    const hour = Math.min(23, Math.floor(view.nowHour))
+    const snowy = view.snowy[hour]
+    let wet = 'dry'
+    if (view.rain[hour] >= trace) {
+      wet = snowy ? `${amount(view.snow[hour], unit.snow)}/h snow` : `${amount(view.rain[hour], unit.rain)}/h`
+    }
+    return { icon: snowy ? 'snow' : 'drop', text: `Now ${wet}${chance(view.prob[hour], '')}` }
+  }
+
+  const { rain, snow, prob } = view.summary
+  const rained = rain >= trace
+  const snowed = snow > 0
+  let text = 'Dry'
+  if (rained && snowed) text = `${amount(rain, unit.rain)}, ${amount(snow, unit.snow)} snow`
+  else if (rained) text = `Total ${amount(rain, unit.rain)}`
+  else if (snowed) text = `Total ${amount(snow, unit.snow)} snow`
+  // Rain and snow together leave no room for the chance.
+  if (!(rained && snowed)) text += chance(prob, 'up to ')
+  return { icon: snowed && !rained ? 'snow' : 'drop', text }
 }
 
 export function windCaption(view, units) {

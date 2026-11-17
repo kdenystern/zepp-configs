@@ -26,6 +26,8 @@ import { isChosen } from '../shared/settings-ui.js'
 
 // A real Open-Meteo answer for Helsinki (UTC+2): 5-7 degrees, drizzle, windy.
 const sample = JSON.parse(readFileSync(new URL('./fixtures/open-meteo-forecast.json', import.meta.url), 'utf8'))
+// The ensemble's answer for the same place and days: rain and its chance.
+const runs = JSON.parse(readFileSync(new URL('./fixtures/open-meteo-ensemble.json', import.meta.url), 'utf8'))
 const START = sample.hourly.time[0]
 const HELSINKI = { name: 'Helsinki', region: 'Uusimaa, Finland', lat: 60.17, lon: 24.94 }
 
@@ -37,13 +39,18 @@ const SEARCH = {
   Helsinki: [{ name: 'Helsinki', latitude: 60.17, longitude: 24.94, admin1: 'Uusimaa', country: 'Finland' }],
 }
 
-// The phone has internet: place search and forecasts both answer.
-function online(forecast = sample) {
+// The phone has internet: place search, forecasts and the ensemble all answer.
+// `ensemble: null` leaves the ensemble out, as if it failed.
+function online(forecast = sample, ensemble = runs) {
   world.internet = (url) => {
     const { hostname, searchParams } = new URL(url)
     if (hostname === 'geocoding-api.open-meteo.com') {
       const results = SEARCH[searchParams.get('name')]
       return results ? { results } : { generationtime_ms: 0.1 }
+    }
+    if (hostname === 'ensemble-api.open-meteo.com') {
+      if (!ensemble) throw new Error('ensemble down')
+      return ensemble
     }
     assert.equal(hostname, 'api.open-meteo.com')
     return forecast
@@ -170,24 +177,51 @@ test('shows now, then temperature, rain and wind over the day', async () => {
   await open()
 
   assert.equal(chip().params.text, 'Helsinki, today')
-  for (const text of ['5°', 'Drizzle', 'Feels -1°', '5° to 7°', '6.5 mm, 100%', 'S, 8 to 12 m/s, gusts 19', 'Updated 20:12']) {
+  for (const text of ['5°', 'Drizzle', 'Feels -1°', '5° to 7°', 'Now 1.0 mm/h, 100%', 'S, 8 to 12 m/s, gusts 19', 'Updated 20:12']) {
     assert.ok(texts().includes(text), `"${text}" not in ${JSON.stringify(texts())}`)
   }
   assert.deepEqual(images(), ['wx/rain.png', 'wx/s-temp.png', 'wx/s-drop.png', 'wx/s-wind.png'])
   // Hour marks along the bottom.
   for (const hour of ['0', '6', '12', '18', '24']) assert.ok(texts().includes(hour))
-  // A bar for each of the 14 hours with rain; the 10 already past are dimmer.
+  // A bar for each of the 17 hours expecting rain; the 13 already past are dimmer.
   assert.equal(rects(0x3987e5).length, 4)
-  assert.equal(rects(0x225189).length, 10)
-  // The rain scale runs from 0 to 2 mm, marked in the margin.
-  for (const mark of ['2', '0']) assert.ok(texts().includes(mark))
+  assert.equal(rects(0x225189).length, 13)
+  // Chance from 0% to 100% on the left, rain from 0 to 2 mm on the right.
+  for (const mark of ['100%', '0%', '2', 'mm']) assert.ok(texts().includes(mark), mark)
   // Rain stays likely all evening, so only the hour now is labelled.
   const chance = textWidgets().filter((w) => w.params.text.endsWith('%') && w.params.y === 222)
-  assert.deepEqual(chance.map((w) => w.params.text), ['92%'])
-  assert.ok(Math.abs(chance[0].params.x + 22 - (27 + 20.5 * 14)) <= 1, 'centred over 20:00')
+  assert.deepEqual(chance.map((w) => w.params.text), ['100%'])
+  assert.ok(Math.abs(chance[0].params.x + 22 - (39 + 20.5 * 13)) <= 1, 'centred over 20:00')
   // A "now" line through each of the three charts.
   assert.equal(rects(0x8a8a8a).length, 3)
-  rects(0x8a8a8a).forEach((line) => assert.equal(line.params.x, 27 + Math.round((20.2 / 24) * 336) - 1))
+  rects(0x8a8a8a).forEach((line) => assert.equal(line.params.x, 39 + Math.round((20.2 / 24) * 312) - 1))
+})
+
+test('rain and its chance come from the ensemble, so no likely hour is left without a bar', async () => {
+  online()
+  choose(HELSINKI)
+  clockAt(13.6)
+  await open()
+  // The forecast's own figures say 0.0 mm from 12:00 to 17:00 at 82-100%;
+  // the ensemble expects rain in every one of those hours.
+  const bars = widgetsOf('FILL_RECT').filter((w) => [0x3987e5, 0x225189].includes(w.params.color))
+  for (let hour = 12; hour < 17; hour++) {
+    assert.ok(bars.some((b) => b.params.x === 39 + Math.round(hour * 13 + 2)), `a bar at ${hour}:00`)
+  }
+  assert.ok(texts().includes('Now 0.1 mm/h, 70%'))
+  const asked = new URL(world.fetched.find((url) => url.includes('ensemble')))
+  assert.equal(asked.searchParams.get('models'), 'icon_seamless')
+  assert.equal(asked.searchParams.get('hourly'), 'precipitation,snowfall')
+})
+
+test("without the ensemble the forecast's own rain figures are drawn", async () => {
+  online(sample, null)
+  choose(HELSINKI)
+  clockAt(20.2)
+  await open()
+  assert.equal(chip().params.text, 'Helsinki, today')
+  // 0.1 mm from 20:00 to 21:00 at 92%, as the forecast has it.
+  assert.ok(texts().includes('Now 0.1 mm/h, 92%'), JSON.stringify(texts()))
 })
 
 test('every widget is on the screen and every image exists', async () => {
@@ -222,13 +256,16 @@ test('all the condition icons are drawn', async () => {
 })
 
 test('snow is drawn in its own colour with a snowflake', async () => {
-  const snowy = structuredClone(sample)
-  snowy.hourly.snowfall = [...snowy.hourly.precipitation] // 1 cm of snow for every mm
-  online(snowy)
+  // 1 cm of snow for every mm, in every run.
+  const snowy = structuredClone(runs)
+  for (const key of Object.keys(snowy.hourly)) {
+    if (key.startsWith('precipitation')) snowy.hourly[key.replace('precipitation', 'snowfall')] = [...snowy.hourly[key]]
+  }
+  online(sample, snowy)
   choose(HELSINKI)
   await open()
   assert.ok(images().includes('wx/s-snow.png'))
-  assert.ok(texts().includes('6.5 cm snow, 100%'))
+  assert.ok(texts().includes('Now 0.1 cm/h snow, 70%'))
   assert.equal(rects(0x3987e5).length, 0)
   assert.ok(rects(0xe6edf5).length > 0)
 })
@@ -239,11 +276,12 @@ test('tapping the place flips to tomorrow and back', async () => {
   await open()
   tap(chip())
   assert.equal(chip().params.text, 'Helsinki, tomorrow')
-  for (const text of ['6°', 'Drizzle', 'Low 5°', '5° to 6°', '11.1 mm, 100%', '6 to 9 m/s, gusts 14']) {
+  for (const text of ['6°', 'Drizzle', 'Low 5°', '5° to 6°', 'Total 6.7 mm, up to 100%', '6 to 9 m/s, gusts 14']) {
     assert.ok(texts().includes(text), `"${text}" not in ${JSON.stringify(texts())}`)
   }
-  // Rain is likely from midnight on; that is the one label.
-  assert.deepEqual(texts().filter((t) => t.endsWith('%') && t.length < 5), ['100%'])
+  // Rain is likely from midnight, and again from 18:00 after a dry afternoon.
+  const chance = textWidgets().filter((w) => w.params.y === 222)
+  assert.deepEqual(chance.map((w) => w.params.text), ['100%', '70%'])
   // Tomorrow has no "now" and nothing dimmed as past.
   assert.equal(rects(0x8a8a8a).length, 0)
   assert.equal(rects(0x225189).length, 0)
@@ -278,7 +316,9 @@ test('changing the units on the phone refetches in those units', async () => {
   assert.deepEqual(chosen(1), ['mph'])
   // The numbers are whatever the service answers; the labels follow the units.
   assert.ok(texts().some((text) => text.includes(' mph')))
-  assert.ok(texts().some((text) => text.includes(' in,')))
+  assert.ok(texts().some((text) => text.includes(' in/h')))
+  assert.ok(texts().includes('in'), 'the rain scale is in inches')
+  assert.equal(new URL(world.fetched.findLast((url) => url.includes('ensemble'))).searchParams.get('precipitation_unit'), 'inch')
 })
 
 // --- without the phone, without internet ---
@@ -309,7 +349,7 @@ test('a forecast from yesterday still covers today, but not tomorrow', async () 
   clockAt(9, 1)
   await open()
   assert.equal(chip().params.text, 'Helsinki, today')
-  assert.ok(texts().includes('11.1 mm, 100%'))
+  assert.ok(texts().includes('Now 0.1 mm/h, 35%'))
   tap(chip())
   assert.equal(chip().params.text, 'Helsinki, today')
   assert.deepEqual(world.toasts, ['No forecast for tomorrow yet'])

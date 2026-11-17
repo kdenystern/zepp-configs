@@ -105,8 +105,10 @@ Read left to right, midnight to midnight:
 
 - **Top:** place and day, conditions now, temperature and what it feels like.
 - **Temperature:** a line, with the day's low and high.
-- **Rain and snow:** a bar per hour, blue for rain and white for snow, with the day's
-  total and the highest chance.
+- **Rain and snow:** a bar per hour for the amount expected, blue for rain and white
+  for snow (scale in mm on the right), and a line for the chance of rain (0% to 100%
+  on the left). The chance is labelled where rain becomes likely. Above the chart:
+  the rain and chance this hour; for tomorrow, the day's total.
 - **Wind:** a line for speed, dashes for gusts, and the current direction.
 - The vertical line and dot mark now. Past hours are darker.
 - Tap the place name for tomorrow, and again to go back.
@@ -115,7 +117,8 @@ Set the place in the Weather settings in the Zepp app: type a town or city, and 
 from the list if the first match is the wrong one. Units are on the same page.
 
 The phone fetches the forecast from [Open-Meteo](https://open-meteo.com) each time the
-app opens. The watch keeps the last one, so it still works for the rest of the day
+app opens. Rain and its chance come from Open-Meteo's ensemble forecast (40 runs of the
+ICON model): the amount is their average, the chance the share of runs with rain. The watch keeps the last one, so it still works for the rest of the day
 without the phone.
 
 ## Tasks

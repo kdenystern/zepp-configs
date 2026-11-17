@@ -220,7 +220,8 @@ if (app === 'watchface') {
   const sample = JSON.parse(readFileSync(join(root, 'test/fixtures/open-meteo-forecast.json'), 'utf8'))
   world.now = new Date((sample.hourly.time[0] + 13.6 * 3600) * 1000)
   sample.current = { ...sample.current, time: sample.hourly.time[13], temperature_2m: 6.9, apparent_temperature: 1.2, is_day: 1 }
-  world.internet = (url) => (url.includes('geocoding') ? { results: [] } : sample)
+  const ensemble = JSON.parse(readFileSync(join(root, 'test/fixtures/open-meteo-ensemble.json'), 'utf8'))
+  world.internet = (url) => (url.includes('geocoding') ? { results: [] } : url.includes('ensemble') ? ensemble : sample)
   settingsStorage.setItem('place', JSON.stringify({ name: 'Helsinki', region: 'Uusimaa, Finland', lat: 60.17, lon: 24.94 }))
   startApp(entry)
   await flush()
