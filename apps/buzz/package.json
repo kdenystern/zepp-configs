@@ -1,0 +1,7 @@
+{
+  "name": "zepp-buzz",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Buzz: try the watch's vibrations"
+}

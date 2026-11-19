@@ -40,6 +40,8 @@ export const ICON_TABLE = {
   // extras for mini apps and anything else
   app: ['squares-four', '#4263eb'],
   food: ['fork-knife', '#2f9e55'],
+  water: ['drop', '#1c7ed6'],
+  buzz: ['vibrate', '#7048e8'],
   torch: ['flashlight', '#d9a406'],
   star: ['star', '#f59f00'],
   heart: ['heart', '#e03131'],

@@ -1,14 +1,18 @@
 # Zepp OS watch face and apps for the Amazfit Cheetah (Square)
 
-A watch face and four small apps, installed by sideloading through the Zepp app's
+A watch face and five small apps, installed by sideloading through the Zepp app's
 Developer Mode.
 
 > **Written by AI.** All of this repository, code, tests and documentation, was written
-> by Claude Fable 5.2, an AI model. Keep that in mind before relying on it.
+> by AI models, Claude Fable and Claude Opus. Keep that in mind before relying on it.
 
-| Launcher Face | Launcher | Nutrition | Weather | Tasks |
-| --- | --- | --- | --- | --- |
-| ![Watch face](docs/watchface.png) | ![Launcher](docs/launcher.png) | ![Nutrition](docs/nutrition.png) | ![Weather](docs/weather.png) | ![Tasks](docs/tasks.png) |
+| Launcher Face | Launcher | Nutrition |
+| --- | --- | --- |
+| ![Watch face](docs/watchface.png) | ![Launcher](docs/launcher.png) | ![Nutrition](docs/nutrition.png) |
+
+| Weather | Tasks | Water |
+| --- | --- | --- |
+| ![Weather](docs/weather.png) | ![Tasks](docs/tasks.png) | ![Water](docs/water.png) |
 
 - **Launcher Face**: time, weekday and date, battery ring, steps and heart rate. The
   button in the bottom right corner opens the Launcher.
@@ -20,6 +24,8 @@ Developer Mode.
   and wind hour by hour.
 - **Tasks**: today's to-do list. One-off and repeating tasks, added on the phone and
   checked off on the wrist.
+- **Water**: a water level that drains over a few hours. Tap the drop after a drink
+  to fill it; if it runs dry, the watch buzzes.
 
 ## Device
 
@@ -40,6 +46,7 @@ npm run qr:launcher
 npm run qr:nutrition
 npm run qr:weather
 npm run qr:tasks
+npm run qr:water
 ```
 
 1. **Developer mode.** In the Zepp app: Profile → Settings → About, tap the Zepp icon
@@ -65,6 +72,7 @@ Heart rate = hr
 Weather = app:68234:page/index @weather
 Nutrition = app:68232:page/index @food
 Tasks = app:68235:page/index @todo
+Water = app:68236:page/index @water
 Torch = screen:FlashLightScreen @torch
 sleep
 ```
@@ -149,11 +157,28 @@ Clean the filter every month
 The tasks are stored on the phone. The watch keeps a copy, so it works with the phone
 away and passes on what was checked off the next time the app opens within reach.
 
-## Known issue
+## Water
 
-Closing a custom app straight back to a watch face can leave the watch face ignoring
-taps. Turning the screen off and on fixes it. This is why apps are opened from the
-Launcher app and not from tiles on the watch face.
+The screen is a water level with a drop in the middle. Tap the drop after a drink and
+the level fills up again. It drains over three hours, or however long you set in the
+Water settings in the Zepp app, in steps of a quarter of an hour. When it runs dry the
+drop turns red and the watch buzzes, with no notification.
+
+Only time awake with the watch on counts. The level stands still while you sleep (by
+the watch's sleep tracking) and while the watch is off your wrist, and carries on from
+where it was.
+
+## Known issues
+
+- Closing a custom app straight back to a watch face can leave the watch face ignoring
+  taps. Turning the screen off and on fixes it. This is why apps are opened from the
+  Launcher app and not from tiles on the watch face.
+- A few unread notifications can silence later vibrations, alarms included. Water
+  therefore buzzes without a notification.
+- In the watch's settings for the customisable buttons, every custom app is listed as
+  "NULL".
+- Setting the vibration to "Enhanced" in the watch's settings makes it much easier to
+  notice.
 
 ## Development
 
@@ -161,11 +186,11 @@ Launcher app and not from tiles on the watch face.
 npm test          # the real code, run against a mock watch and phone
 npm run icons     # regenerate icons and watch face artwork
 npm run screens   # redraw the pictures in docs/
-npm run build     # build all five into apps/*/dist/
+npm run build     # build every app into apps/*/dist/
 ```
 
 ```
-apps/        watchface, launcher, nutrition, weather, tasks
+apps/        watchface, launcher, nutrition, weather, tasks, water
 shared/      tile config parser, tile layout, icon table, settings page look
 test/        tests and the mock watch, phone and internet
 tools/       icon and picture generators

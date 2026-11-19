@@ -4,7 +4,7 @@
 // `registry` holds what the app code registers when its modules load (App,
 // Page, ...). `world` is the mutable state tests inspect and tweak.
 
-export const registry = { app: null, appId: 0, pages: {}, watchface: null, side: null, settingsPage: null, loading: null }
+export const registry = { services: {}, app: null, appId: 0, pages: {}, watchface: null, side: null, settingsPage: null, loading: null }
 
 export const world = {}
 
@@ -30,6 +30,14 @@ export function resetWorld() {
     stack: [], // [{ url, params }]
     page: null, // instance of the page on top of the stack
     side: null, // running side service, if any
+    alarms: [], // { id, url, time, ... } set with @zos/alarm
+    nextAlarmId: 1,
+    alarmsBroken: false, // alarm.set fails (returns 0)
+    notifications: [], // what @zos/notification sent
+    vibrations: [], // modes the Vibrator started
+    worn: true, // the Wear sensor: true, false, or null for not sure
+    sleep: null, // { asleep, startTime, endTime, totalTime } for the Sleep sensor
+    sleepBroken: false,
   })
 }
 resetWorld()
@@ -164,6 +172,9 @@ globalThis.getApp = () => world.appInstance
 globalThis.Page = (options) => {
   registry.pages[registry.loading] = options
 }
+globalThis.AppService = (options) => {
+  registry.services[registry.loading] = options
+}
 globalThis.WatchFace = (options) => {
   registry.watchface = options
 }
@@ -181,4 +192,16 @@ for (const type of ['View', 'Section', 'Text', 'TextInput', 'Button', 'Toggle', 
     props: props || {},
     children: children === undefined ? [] : [].concat(children),
   })
+}
+
+// --- app services ---
+
+// Runs an app service once, as an alarm does: a fresh instance, onInit with
+// the alarm's param, then onDestroy.
+export function runService(url, param) {
+  const definition = registry.services[url]
+  if (!definition) throw new Error(`no such app service: ${url}`)
+  const service = { ...definition, state: structuredClone(definition.state || {}) }
+  if (service.onInit) service.onInit(param)
+  if (service.onDestroy) service.onDestroy()
 }

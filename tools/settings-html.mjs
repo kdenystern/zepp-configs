@@ -13,8 +13,8 @@ import { root } from './sharp.mjs'
 import { loadApp, reset, world, startApp, flush, settingsPage, settingsStorage, nodes, tap, button } from '../test/support/harness.mjs'
 
 const [app, out] = process.argv.slice(2)
-if (!['launcher', 'nutrition', 'weather', 'tasks'].includes(app) || !out) {
-  console.error('usage: settings-html.mjs launcher|nutrition|weather|tasks <file.html>')
+if (!['launcher', 'nutrition', 'weather', 'tasks', 'water'].includes(app) || !out) {
+  console.error('usage: settings-html.mjs launcher|nutrition|weather|tasks|water <file.html>')
   process.exit(1)
 }
 
@@ -38,6 +38,8 @@ if (app === 'launcher') {
       : sample
   nodes(settingsPage(), 'TextInput')[0].props.onChange('Springfield')
   await flush()
+} else if (app === 'water') {
+  // The defaults are what there is to see.
 } else {
   const add = (text) => nodes(settingsPage(), 'TextInput')[0].props.onChange(text)
   ;['Take pills every day', 'Workout every 3 days', 'Buy milk and star anise', 'Call the dentist', 'Bins every Thu'].forEach(add)

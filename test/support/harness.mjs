@@ -10,10 +10,11 @@ import {
   startWatchface,
   resumeWatchface,
   settingsStorage,
+  runService,
 } from './world.mjs'
 import { setMissingSystemApps } from './zos/router.js'
 
-export { world, startApp, closeApp, startWatchface, resumeWatchface, settingsStorage }
+export { world, startApp, closeApp, startWatchface, resumeWatchface, settingsStorage, runService }
 export { systemAppId } from './zos/router.js'
 
 const apps = new URL('../../apps/', import.meta.url)
@@ -35,10 +36,25 @@ export async function loadApp(name) {
     registry.loading = url
     await import(new URL(url + '.js', base))
   }
+  for (const url of (modules['app-service'] && modules['app-service'].services) || []) {
+    registry.loading = url
+    await import(new URL(url + '.js', base))
+  }
   registry.loading = null
-  await import(new URL(modules['app-side'].path + '.js', base))
-  await import(new URL(modules.setting.path + '.js', base))
+  if (modules['app-side']) await import(new URL(modules['app-side'].path + '.js', base))
+  if (modules.setting) await import(new URL(modules.setting.path + '.js', base))
   return modules.page.pages[0]
+}
+
+// Fires the earliest alarm: the clock moves to its time, it is removed and
+// what it names runs. Returns the alarm, or null if none is set.
+export function fireAlarm() {
+  if (!world.alarms.length) return null
+  const alarm = world.alarms.reduce((a, b) => (b.time < a.time ? b : a))
+  world.alarms = world.alarms.filter((a) => a !== alarm)
+  world.now = new Date(alarm.time * 1000)
+  runService(alarm.url, alarm.param)
+  return alarm
 }
 
 // Back to a factory-fresh watch and phone.

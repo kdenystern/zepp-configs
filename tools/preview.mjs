@@ -183,8 +183,8 @@ async function snapshot(name, scroll = 0) {
 }
 
 const app = process.argv[2]
-if (!['watchface', 'launcher', 'nutrition', 'weather', 'tasks'].includes(app)) {
-  console.error('usage: preview.mjs watchface|launcher|nutrition|weather|tasks')
+if (!['watchface', 'launcher', 'nutrition', 'weather', 'tasks', 'water', 'buzz'].includes(app)) {
+  console.error('usage: preview.mjs watchface|launcher|nutrition|weather|tasks|water|buzz')
   process.exit(1)
 }
 
@@ -245,6 +245,25 @@ if (app === 'watchface') {
   const undo = () => world.widgets.find((w) => w.type === 'BUTTON' && w.params.text === 'Undo')
   for (let i = 0; i < 4; i++) tap(undo())
   await snapshot('tasks-long', 150)
+} else if (app === 'buzz') {
+  world.now = new Date(2026, 10, 19, 14, 5, 0)
+  startApp(entry)
+  await flush()
+  tap(button('Gentle'))
+  await snapshot('buzz')
+} else if (app === 'water') {
+  // Tapped at 12:10: a little over a third left at 14:05, then dry at 15:10.
+  world.now = new Date(2026, 10, 18, 12, 10, 0)
+  startApp(entry)
+  await flush()
+  const drop = () => world.widgets.find((w) => w.type === 'BUTTON' && w.visible)
+  tap(drop())
+  world.now = new Date(2026, 10, 18, 14, 5, 0)
+  world.page.render()
+  await snapshot('water')
+  world.now = new Date(2026, 10, 18, 15, 10, 0)
+  world.page.render()
+  await snapshot('water-dry')
 } else {
   startApp(entry)
   await flush()

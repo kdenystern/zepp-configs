@@ -148,6 +148,28 @@ function rowSvg(pressed) {
 images['apps/tasks/assets/default.s/row.png'] = rowSvg(false)
 images['apps/tasks/assets/default.s/row_p.png'] = rowSvg(true)
 
+// --- water app ---
+
+images['apps/water/assets/default.s/icon.png'] = appIcon(
+  '#1c7ed6',
+  `<g transform="translate(46 46) scale(${156 / 256})" fill="#ffffff">${await glyph('drop')}</g>`,
+)
+
+// The drop in the middle of the screen: a thin outline, filled while pressed.
+// Red once the level has run dry.
+const DROP_SIZE = 150
+for (const [name, color] of [['drop', '#ffffff'], ['drop_red', '#f03e3e']]) {
+  images[`apps/water/assets/default.s/${name}.png`] = glyphSvg(await glyph('drop', 'light'), DROP_SIZE, color)
+  images[`apps/water/assets/default.s/${name}_p.png`] = glyphSvg(await glyph('drop', 'fill'), DROP_SIZE, color)
+}
+
+// --- buzz app ---
+
+images['apps/buzz/assets/default.s/icon.png'] = appIcon(
+  '#7048e8',
+  `<g transform="translate(46 46) scale(${156 / 256})" fill="#ffffff">${await glyph('vibrate')}</g>`,
+)
+
 // --- watch face: thin lines only, which is what reads well on this screen ---
 
 const face = 'apps/watchface/assets/default.s/face'

@@ -21,11 +21,14 @@ session needs to know.
   credentials (no `gh`, no SSH key): a push needs a token from the user each time.
   Commits use the account's GitHub noreply address (set in the repo's git config) so
   no personal email is published. Licence: MIT (`LICENSE`).
+- README (user, 2026-11-19): screenshots in rows of three, not one long row; test
+  tools such as Buzz are left out of it.
 - **README rules (user, 2026-11-16).** It is for human readers: short, plain and
   level-headed. No verification status, no caveats about what is or is not proven, no
   explanations of platform limits the user already knows, nothing apologetic or
-  promotional. It carries a notice that the whole repo was written by Claude Fable 5.2;
-  keep it. Anything meant for an AI session (what is confirmed on hardware, toolchain
+  promotional. It carries a notice that the repo was written by AI models, "Claude Fable and Claude
+  Opus", without version numbers (user, 2026-11-19: models change, and the commit dates
+  show which was current); keep it. Anything meant for an AI session (what is confirmed on hardware, toolchain
   traps, API facts) goes in this file, not the README.
 - Keep this file current at the end of a piece of work (the user asked for that).
 
@@ -38,6 +41,8 @@ session needs to know.
 | `apps/nutrition` | Calorie and protein tracker | 68232 |
 | `apps/weather` | Weather: today (or tomorrow) hour by hour on one screen | 68234 |
 | `apps/tasks` | Tasks: today's to-do list, one-off and repeating, checked off on the watch | 68235 |
+| `apps/water` | Water: a level that drains over an adjustable wait, tap the drop to refill, buzz when dry | 68236 |
+| `apps/buzz` | Buzz: a test bench for vibrations (motor, notification, alarm) | 68237 |
 | `shared/` | `config.js` (text config parser), `layout.js` (tile grid), `icons.js` (icon table), `tiles.js` (draw and launch tiles), `settings-ui.js` (the dark look of every settings page) | |
 | `test/support/` | Mock watch, phone, BLE link and internet | |
 | `test/fixtures/` | Real Open-Meteo forecast and ensemble answers (Helsinki, same days), used by weather tests and previews | |
@@ -127,6 +132,95 @@ tasks shown, a checked task disappears, Undo at the bottom. All the logic is in
   strip. The page itself never scrolls.
 - Not in the Launcher's default tiles: the user adds `Tasks = app:68235:page/index @todo`.
 
+**Water.** Built 2026-11-18 (by Claude Opus 5.5). The user does not feel thirst
+reliably and wants only a safety net for the worst case: "make it buzz if it wasn't
+opened after 3 hours, the whole app being just one button to confirm I have drunk
+something" (2026-11-18, after rejecting a first version with a goal, drink sizes, a
+timeline and Undo as "too much thinking"). Keep it that small. The second version, a
+big blue "Drank" button with times above and below, they rejected as embarrassing to
+use in front of people: "make it normal", **no text or numbers**. Then (same day) they
+asked for the wait to be adjustable instead of fixed wake/bed times, and for the app to
+use their **actual** sleep from the watch. On 2026-11-19 they corrected the sleep rule:
+"if I am sleeping the time shouldn't go up at all, not skip buzzing" (the level must
+stand still in the night, not refill at waking), and said they **did not notice the
+buzz at all** on the first install (vibrate 4 "gentle"), so Buzz was built to find one
+they feel. Later on 2026-11-19, after trying Buzz: unread notifications (two or more)
+seem to **silence vibrations**, so Water must **not send a notification, only buzz**;
+the "4 times" button (`VIBRATOR_SCENE_STRONG_REMINDER`, which they felt as repeated
+buzzing) is exactly the signal they want; time **off the wrist** must not count either;
+the wait should be finer (they want 2 h 45 min). Design:
+- Watch page: a full-width blue `FILL_RECT` from the bottom whose height is the share of
+  the wait left (`levelAt`). A thin-line Phosphor drop (`drop.png`, 150 px,
+  `drop_p.png` filled while pressed) is an image `BUTTON` in the middle; at zero a red
+  copy (`drop_red*.png`) is shown instead via `prop.VISIBLE`. Tapping either stores the
+  time in `LocalStorage` key `last` and refills. A global `setInterval` redraws every
+  20 s while open (cleared in `onDestroy`; global timers are documented for pages but
+  not yet used on this watch). Opening the app without tapping only settles a stored
+  off-wrist time (below).
+- Only **time awake** counts (`awakeSince`): from the last tap to now, minus the
+  overlap with the night from the `Sleep` sensor (`readSleep` in `lib/watch.js`,
+  permission `data:user.hd.sleep`, turned into `{ start, end }` by `sleepSpan`). Awake:
+  `getInfo()`'s `startTime`/`endTime` (minutes after local midnight), the night that
+  ended within the last day. Asleep (`getSleepingStatus() === 1`): from the latest
+  `startTime` until now, which assumes `getInfo()` reports the night in progress or a
+  similar bedtime (unknown). Only one night is subtracted. `updateInfo()` is called on
+  open and in the service; the page re-reads every 5 min while open. Without sleep data
+  all the time counts. The very first open stores a tap so it starts full.
+- **Off the wrist** (`Wear` sensor, `getStatus()`: 0 off, 1 worn, 2 moving, 3 unsure):
+  app.json has `"app-event": { "path": "app-service/remind" }` and the permissions
+  `event:os.health.wear_status` and `event:os.health.sleep_status`, so the system
+  wakes the service on those changes (docs: guides/framework/device/system-event).
+  Seen off: the service stores the moment in `LocalStorage` key `off`. Seen on (by the
+  service, or by the page opening): `liftOff` moves `last` on by the time off and
+  clears `off`. Without the events, the alarm checks notice it (every 30 min while
+  paused). Service writes are allowed with the screen off, per the docs.
+- Reminders: whenever the page opens or the drop is tapped, `plan()` cancels all of the
+  app's alarms (`getAllAlarms`) and sets one-shot `@zos/alarm`s (`store: true`, given
+  both `time` and `date` because the docs and the official notification sample
+  disagree on the name, plus `repeat_type: REPEAT_ONCE`): the first when the wait runs
+  out if you stay awake (or half an hour on while paused: asleep or off the wrist, or
+  a whole wait on once already due), then every `gap` up to 48 h / 24 alarms as a
+  fallback. Each alarm wakes the App Service `app-service/remind`, which buzzes only if
+  `shouldBuzz` (not paused, and at least `gap` minus 5 min counted since the tap) and
+  re-plans from its own state. If nothing can be read, it buzzes.
+- The buzz: `buzz()` in `lib/watch.js`, `Vibrator` `stop()`, `setMode(
+  VIBRATOR_SCENE_STRONG_REMINDER)`, `start()`, the same calls as Buzz's "4 times".
+  **No notification** (and no `device:os.notification` permission). Earlier builds
+  sent one, first with an "Open" action pointing at `page/index` (the docs say an
+  action's `file` must be an App Service), then "Drank"; the user disliked that name
+  and the notification is gone. Unknown: whether the vibration outlives the service's
+  600 ms, and whether it ever stops by itself (from a page it buzzes until the app
+  closes, see Buzz below).
+- Docs-based worries, all unseen on hardware: App Service single runs get 600 ms; the
+  docs' API table for services does not list `@zos/alarm` or `@zos/storage` (both are
+  wrapped in `try`), and says file writes work only with the screen off. How quickly `getSleepingStatus()` and
+  `endTime` follow real waking is unknown. Local time comes from the `Time` sensor via
+  `clockOffset()` (wall clock minus UTC, rounded to 15 min).
+- Settings page: "Remind after", with − and + pill `Button`s, 30 min to 6 h in 15 min
+  steps, default 3 h (no `TextInput`, because of the white pop-up the user hates).
+  Settings storage key `gap` (minutes as a string); the side service hands it over on
+  `SETTINGS` and pushes it on change. (A vibration choice existed briefly; removed with
+  the notification.)
+- Not in the Launcher's default tiles: the user adds `Water = app:68236:page/index @water`.
+
+**Buzz.** Built 2026-11-19 (by Claude Opus 5.5) because the user felt nothing from
+Water's first buzz. One screen, no scrolling, labelled buttons (a test tool, so text is
+fine): six `Vibrator` patterns (`setMode(n)` then `start()`, as the official t9-keyboard
+sample does; a constant missing on the firmware shows "not on this watch"), seven
+`notify()` vibrations (the six documented plus 6, which the official notification
+sample uses), and "In 1 min", which sets an alarm (`time` and `date`, `store: true`) for
+`app-service/ping` to buzz "4 times" with no notification, exactly Water's path. The
+first build's "In 1 min" sent a notification from the alarm and never arrived for the
+user (2026-11-19); maybe unread notifications silenced it, maybe the alarm never fired.
+They did not retest. The status line shows the
+result (`notify`'s id 0 = not sent, `set`'s id 0 = alarm not set). No phone side or
+settings page; the harness now allows apps without them. Tile:
+`Buzz = app:68237:page/index @buzz`. What the user reports from it decides Water's
+default vibration and whether alarms and services work at all.
+- Mocks: `test/support/zos/alarm.js`, `notification.js`, `Sleep`, `Wear` and `Vibrator`
+  in `sensor.js` (`world.sleep`, `world.sleepBroken`, `world.worn`, `world.vibrations`), the `AppService` global and `fireAlarm()` in the
+  harness (moves `world.now` to the alarm and runs the service).
+
 **Launcher.** Any number of tiles up to 60, three square tiles per row; the first nine
 fill one screen under a status line, more rows scroll. Icon tiles are single image
 buttons (`normal_src`/`press_src`, `w: -1, h: -1`).
@@ -191,6 +285,18 @@ Nutrition app fixed it. Treat it as a firmware bug to design around:
   `Time.getTime()`, and how wide the texts come out in the watch's own font (the
   page avoids characters beyond `°` on purpose).
 
+- Water: the first build was installed 2026-11-18 and the user noticed no buzz
+  (2026-11-19). Unseen: **alarms waking an App Service at all** (Buzz's "In 1 min" never
+  arrived), the `Vibrator` from a service, the system events and `Wear`, the service
+  reading and writing `LocalStorage` and setting alarms, the `Sleep` sensor (especially
+  `startTime` while asleep), and how many persistent alarms one app may hold (up to 24).
+- Buzz (user, 2026-11-19): the motor buttons work from a page. "4 times"
+  (`setMode(VIBRATOR_SCENE_STRONG_REMINDER)` then `start()`) **buzzes continuously
+  until the app is closed**, not four times; the user wants exactly that as Water's
+  signal and notes it is a way to get a continuous buzz. From a single-run App Service
+  (600 ms) it is unknown whether it stops when the service exits or keeps going; there
+  is no timer in a service to `stop()` it. Ask the user after the first real reminder. Notifications from a page arrive (unread ones then silence vibrations).
+  The alarm path is unconfirmed.
 - Tasks, the parts nobody has reported on: a list longer than five rows scrolling under
   the pinned Undo (the black `FILL_RECT` past the last row is meant to lengthen the
   scroll; if the list will not scroll with Undo showing, suspect the strip's default
@@ -201,6 +307,9 @@ Nutrition app fixed it. Treat it as a firmware bug to design around:
 
 ## User preferences
 
+- Watch settings, vibration "Enhanced": makes buzzes noticeable for the user (they
+  report, 2026-11-19). In the watch's button-shortcut settings every custom app shows
+  as "NULL" (README known issue).
 - Nutrition: the user only looks at today. They know Zepp's own calorie tracking cannot
   be written to and do not want it explained again. (The app still syncs day totals to
   the phone: 30 days kept on the watch, 180 in the settings page.)

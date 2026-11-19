@@ -3,13 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "description": "Zepp OS watch face and mini apps for the Amazfit Cheetah (Square): an app-launcher watch face, a calorie/protein tracker, a weather app and a daily task list",
+  "description": "Zepp OS watch face and mini apps for the Amazfit Cheetah (Square): an app-launcher watch face, a calorie/protein tracker, a weather app a daily task list, a water reminder and a vibration tester",
   "type": "module",
   "workspaces": [
     "apps/*"
   ],
   "scripts": {
-    "build": "npm run build:watchface && npm run build:launcher && npm run build:nutrition && npm run build:weather && npm run build:tasks",
+    "build": "npm run build:watchface && npm run build:launcher && npm run build:nutrition && npm run build:weather && npm run build:tasks && npm run build:water && npm run build:buzz",
     "build:weather": "cd apps/weather && zeus build",
     "build:tasks": "cd apps/tasks && zeus build",
     "qr:tasks": "cd apps/tasks && zeus preview",
@@ -19,10 +19,14 @@
     "qr:launcher": "cd apps/launcher && zeus preview",
     "qr:nutrition": "cd apps/nutrition && zeus preview",
     "test": "node --import ./test/support/register.mjs --test \"test/*.test.mjs\"",
-    "screens": "node --import ./test/support/register.mjs tools/preview.mjs watchface && node --import ./test/support/register.mjs tools/preview.mjs launcher && node --import ./test/support/register.mjs tools/preview.mjs nutrition && node --import ./test/support/register.mjs tools/preview.mjs weather && node --import ./test/support/register.mjs tools/preview.mjs tasks",
+    "screens": "node --import ./test/support/register.mjs tools/preview.mjs watchface && node --import ./test/support/register.mjs tools/preview.mjs launcher && node --import ./test/support/register.mjs tools/preview.mjs nutrition && node --import ./test/support/register.mjs tools/preview.mjs weather && node --import ./test/support/register.mjs tools/preview.mjs tasks && node --import ./test/support/register.mjs tools/preview.mjs water && node --import ./test/support/register.mjs tools/preview.mjs buzz",
     "icons": "node tools/make-icons.mjs",
     "build:watchface": "cd apps/watchface && zeus build",
-    "qr:watchface": "cd apps/watchface && zeus preview"
+    "qr:watchface": "cd apps/watchface && zeus preview",
+    "build:water": "cd apps/water && zeus build",
+    "qr:water": "cd apps/water && zeus preview",
+    "build:buzz": "cd apps/buzz && zeus build",
+    "qr:buzz": "cd apps/buzz && zeus preview"
   },
   "devDependencies": {
     "@phosphor-icons/core": "^2.1.1",

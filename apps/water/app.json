@@ -1,0 +1,67 @@
+{
+  "configVersion": "v3",
+  "app": {
+    "appId": 68236,
+    "appName": "Water",
+    "appType": "app",
+    "version": {
+      "code": 1,
+      "name": "0.1.0"
+    },
+    "icon": "icon.png",
+    "vender": "kdenys",
+    "description": "A water level that drains; a buzz when it runs dry"
+  },
+  "permissions": [
+    "device:os.local_storage",
+    "device:os.alarm",
+    "device:os.bg_service",
+    "data:user.hd.sleep",
+    "event:os.health.wear_status",
+    "event:os.health.sleep_status"
+  ],
+  "runtime": {
+    "apiVersion": {
+      "compatible": "3.0.0",
+      "target": "3.6.0",
+      "minVersion": "3.0"
+    }
+  },
+  "targets": {
+    "default": {
+      "module": {
+        "page": {
+          "pages": [
+            "page/index"
+          ]
+        },
+        "app-service": {
+          "services": [
+            "app-service/remind"
+          ]
+        },
+        "app-side": {
+          "path": "app-side/index"
+        },
+        "setting": {
+          "path": "setting/index"
+        },
+        "app-event": {
+          "path": "app-service/remind"
+        }
+      },
+      "platforms": [
+        {
+          "st": "s",
+          "dw": 390
+        }
+      ]
+    }
+  },
+  "i18n": {
+    "en-US": {
+      "appName": "Water"
+    }
+  },
+  "defaultLanguage": "en-US"
+}
