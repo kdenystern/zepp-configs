@@ -16,6 +16,11 @@ export const SETTINGS_KEY = 'settings' // watch LocalStorage, as the phone sent 
 // The time it spends off does not count either.
 export const OFF_KEY = 'off'
 
+// The most time counted since the last tap (watch LocalStorage), so the level
+// only ever goes down between taps, even if the sleep data later reads
+// differently. Only a tap sets it back to 0.
+export const SPENT_KEY = 'spent'
+
 // Phone settings storage key: minutes to wait before the buzz, as a string.
 export const GAP_KEY = 'gap'
 export const PHONE_KEYS = [GAP_KEY]
@@ -137,22 +142,28 @@ export function awakeSince(last, now, night) {
   return Math.max(0, awake)
 }
 
+// Time counted since the last tap, never less than `spent` (what was counted
+// before). Never tapped: forever.
+export function counted({ last, now, night, spent = 0 }) {
+  return Math.max(spent || 0, awakeSince(last, now, night))
+}
+
 // --- reminders ---
 
 // Should a reminder that fires at `now` buzz? Not while paused (asleep or off
 // the wrist), and only once the wait has passed in time that counts.
-export function shouldBuzz({ last, night, now, settings, paused }) {
-  if (paused) return false
-  return awakeSince(last, now, night) >= gapMs(settings) - EARLY
+export function shouldBuzz(state) {
+  if (state.paused) return false
+  return counted(state) >= gapMs(state.settings) - EARLY
 }
 
 // When the service should look next, ascending: the moment the wait runs out
 // if you stay awake (again a whole wait on once it has run out), every half
 // hour while paused, then every wait after that in case the service cannot
 // set alarms itself. The first is after `after`.
-export function reminderTimes({ last, night, now, settings, paused, after = now }) {
+export function reminderTimes({ last, night, now, settings, paused, spent, after = now }) {
   const gap = gapMs(settings)
-  const left = gap - awakeSince(last, now, night)
+  const left = gap - counted({ last, now, night, spent })
   let t = paused ? now + PAUSED_CHECK : left > EARLY ? now + left : now + gap
   if (t <= after) t = after + MINUTE
   const times = []
@@ -164,8 +175,8 @@ export function reminderTimes({ last, night, now, settings, paused, after = now 
 }
 
 // How full the glass is, 1 to 0: it drains over `gap` of time awake.
-export function levelAt({ last, night, now, settings }) {
+export function levelAt({ last, night, now, settings, spent }) {
   const gap = gapMs(settings)
-  const awake = awakeSince(last, now, night)
+  const awake = counted({ last, now, night, spent })
   return awake === Infinity ? 0 : Math.max(0, Math.min(1, (gap - awake) / gap))
 }

@@ -113,6 +113,10 @@ tasks shown, a checked task disappears, Undo at the bottom. All the logic is in
   `SYNC` sends `{ id: { due, done } }` and gets the active list back; changes are
   dropped only when the answer covers them, so a lost answer costs nothing. One request
   at a time. The phone keeps a separate undo stack (key `undo`) for its own Done buttons.
+- Order: the database array's order is the list order everywhere (no sorting by id;
+  new tasks go last). The settings page's "All tasks" rows have big ▲/▼ pill buttons
+  (`moveTask`, which skips finished one-offs); added 2026-11-19 at the user's request,
+  unseen on the phone.
 - The list's day changes at 04:00 (`DAY_STARTS_AT`), on the watch and the phone alike.
 - Watch drawing: per row a `TEXT` (wrap) under an image `BUTTON` (`row.png` is
   see-through with the ring and rule; `row_p.png` is the pressed look), the same
@@ -196,6 +200,12 @@ the wait should be finer (they want 2 h 45 min). Design:
   wrapped in `try`), and says file writes work only with the screen off. How quickly `getSleepingStatus()` and
   `endTime` follow real waking is unknown. Local time comes from the `Time` sensor via
   `clockOffset()` (wall clock minus UTC, rounded to 15 min).
+- Only a tap refills (user, 2026-11-19): `LocalStorage` key `spent` holds the most
+  time counted since the tap, and `counted()` never returns less, so a later change
+  in the sleep data (e.g. `asleep` with an old `startTime`) cannot raise the level.
+  Reset to 0 only by a tap (or the very first open, which starts full). The open page
+  also reads `Wear` on every redraw and stops draining while it reads off (unsure
+  counts as worn).
 - Settings page: "Remind after", with − and + pill `Button`s, 30 min to 6 h in 15 min
   steps, default 3 h (no `TextInput`, because of the white pop-up the user hates).
   Settings storage key `gap` (minutes as a string); the side service hands it over on

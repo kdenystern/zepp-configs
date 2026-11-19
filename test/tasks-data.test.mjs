@@ -175,10 +175,10 @@ test('when a task is next on the list', () => {
   assert.equal(whenLabel(task({ due: '2026-11-19' }), MON), 'Thu 19 Nov')
 })
 
-test('tasks from storage are validated, deduplicated and put in order', () => {
+test('tasks from storage are validated, deduplicated and kept in order', () => {
   const tasks = normaliseTasks([
-    { id: 2, title: 'B', due: MON, done: 'yesterday' },
     { id: 1, title: ' A ', repeat: { days: 2 }, due: MON, done: MON, extra: 1 },
+    { id: 2, title: 'B', due: MON, done: 'yesterday' },
     { id: 2, title: 'again', due: MON },
     { id: 3, title: '', due: MON },
     { id: 4, title: 'no day' },

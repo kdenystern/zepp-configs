@@ -2,12 +2,26 @@
 // that drains over the wait set on the phone (3 hours unless changed), and a
 // drop in the middle to tap after a drink, which fills it up again. When it
 // has run dry the drop turns red. While you sleep (by the watch's sleep data)
-// or the watch is off the wrist it does not drain. A tap also moves the next buzz (lib/watch.js plan()).
+// or the watch is off the wrist it does not drain, and only a tap on the drop
+// ever fills it (the most time counted is kept in `spent`). A tap also moves the next buzz (lib/watch.js plan()).
 import { createWidget, widget, prop, setStatusBarVisible } from '@zos/ui'
 import { BasePage } from '@zeppos/zml/base-page'
 
-import { clockNow, readSleep, loadLast, saveLast, loadOff, saveOff, loadSettings, saveSettings, plan } from '../lib/watch'
-import { levelAt, liftOff } from '../lib/water'
+import {
+  clockNow,
+  readSleep,
+  readWorn,
+  loadLast,
+  saveLast,
+  loadOff,
+  saveOff,
+  loadSpent,
+  saveSpent,
+  loadSettings,
+  saveSettings,
+  plan,
+} from '../lib/watch'
+import { levelAt, liftOff, counted } from '../lib/water'
 
 const WIDTH = 390
 const HEIGHT = 450
@@ -19,6 +33,9 @@ const WATER = 0x1f6fb8
 const TICK = 20000
 
 let last = 0
+let spent = 0
+// When the watch was seen off the wrist while open, 0 while worn.
+let off = 0
 let settings = null
 // The sleep data, read when the page opens and again every few minutes.
 let sleep = { asleep: false, night: null }
@@ -31,9 +48,35 @@ function readSleepNow(fresh) {
   sleepRead = now
 }
 
+// Off the wrist while open: that time does not count. Back on: the tap is
+// moved on by the time it was off.
+function checkWorn(now) {
+  const worn = readWorn()
+  if (worn === false && !off) {
+    off = now
+    saveOff(off)
+  } else if (worn !== false && off) {
+    last = liftOff(last, off, now)
+    if (last) saveLast(last)
+    off = 0
+    saveOff(0)
+  }
+}
+
+// The state as of `now`, with the most time counted so far kept.
+function stateAt(now) {
+  const state = { last: liftOff(last, off, now), night: sleep.night, now, settings, spent }
+  const total = counted(state)
+  if (last && total > spent && total !== Infinity) {
+    spent = state.spent = total
+    saveSpent(spent)
+  }
+  return state
+}
+
 function replan() {
   const { now } = clockNow()
-  plan({ last, night: sleep.night, paused: sleep.asleep, settings, now })
+  plan({ ...stateAt(now), paused: sleep.asleep || !!off })
 }
 
 Page(
@@ -42,18 +85,17 @@ Page(
 
     onInit() {
       last = loadLast()
-      // The app is open, so the watch is on: the time it was off (noticed by
-      // the reminder service) does not count.
-      const off = loadOff()
-      if (off) {
-        last = liftOff(last, off, clockNow().now)
-        if (last) saveLast(last)
-        saveOff(0)
-      }
+      spent = loadSpent()
+      // The time it was off (noticed by the reminder service) does not count;
+      // if it is back on now, the tap is moved on by that time.
+      off = loadOff()
+      checkWorn(clockNow().now)
       // The very first time, it starts full.
       if (!last) {
         last = clockNow().now
         saveLast(last)
+        spent = 0
+        saveSpent(0)
       }
       settings = loadSettings()
       readSleepNow(true)
@@ -94,7 +136,10 @@ Page(
         readSleepNow(false)
         now = sleepRead
       }
-      const level = levelAt({ last, night: sleep.night, now, settings })
+      const wasOff = off
+      checkWorn(now)
+      if (wasOff !== off) replan()
+      const level = levelAt(stateAt(now))
       const h = Math.round(HEIGHT * level)
       this.state.water.setProperty(prop.VISIBLE, h > 0)
       if (h > 0) this.state.water.setProperty(prop.MORE, { x: 0, y: HEIGHT - h, w: WIDTH, h })
@@ -105,6 +150,10 @@ Page(
     drank() {
       last = clockNow().now
       saveLast(last)
+      spent = 0
+      saveSpent(0)
+      off = 0
+      saveOff(0)
       replan()
       this.render()
     },

@@ -262,3 +262,41 @@ test('the wait set on the phone reaches the watch', async () => {
   await open()
   assert.equal(firstAlarm(), '18 11:30')
 })
+
+test('only a tap fills it: a change in the sleep data never raises the level', async () => {
+  awake()
+  setTime(12, 0)
+  await open()
+  tap(drop())
+  setTime(13, 30)
+  closeApp()
+  await open()
+  assert.equal(level(), 225)
+  // The watch now claims you have been asleep since 22:30 yesterday.
+  asleep()
+  closeApp()
+  await open()
+  assert.equal(level(), 225, 'held where it was, not filled')
+  tap(drop())
+  assert.equal(level(), 450)
+})
+
+test('the level stands still while the open app is off the wrist', async () => {
+  setTime(9, 0)
+  await open()
+  tap(drop())
+  setTime(10, 0)
+  world.worn = false
+  closeApp()
+  await open()
+  const before = level()
+  setTime(11, 0)
+  closeApp()
+  await open()
+  assert.equal(level(), before)
+  world.worn = true
+  setTime(11, 30)
+  closeApp()
+  await open()
+  assert.equal(level(), 300, "only 9:00 to 10:00 counted")
+})

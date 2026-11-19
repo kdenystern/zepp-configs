@@ -426,6 +426,20 @@ test('tasks can be changed and deleted on the phone', async () => {
   assert.equal(task('Stretch').id, 4, 'ids are not reused')
 })
 
+test('the arrows on the phone reorder the tasks, and the watch follows', async () => {
+  ROUTINE.forEach(add)
+  await open()
+  press('All tasks', '▼', 0)
+  assert.deepEqual(db().tasks.map((t) => t.title), ['Workout', 'Take pills', 'Buy milk and star anise'])
+  press('All tasks', '▲', 2)
+  assert.deepEqual(db().tasks.map((t) => t.title), ['Workout', 'Buy milk and star anise', 'Take pills'])
+  press('All tasks', '▲', 0)
+  press('All tasks', '▼', 2)
+  assert.deepEqual(db().tasks.map((t) => t.title), ['Workout', 'Buy milk and star anise', 'Take pills'], 'ends stay put')
+  await open()
+  assert.deepEqual(shown(), ['Workout', 'Buy milk and star anise', 'Take pills'])
+})
+
 test('a change on the phone starts from what is stored, not from what the page showed', async () => {
   ROUTINE.forEach(add)
   const stale = settingsPage()

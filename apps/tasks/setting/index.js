@@ -12,6 +12,7 @@ import {
   addTask,
   editTask,
   deleteTask,
+  moveTask,
   checkTask,
   uncheckTask,
   activeTasks,
@@ -27,6 +28,8 @@ import { THEME, page, card, text, note, input, button, addButton, row } from '..
 
 const SHOWN_DONE = 30
 const SIDE = { marginLeft: '8px', flexShrink: '0' }
+// Big targets for moving a task up or down: easy to hit with a thumb.
+const MOVE = { flexShrink: '0', width: '56px', height: '48px', padding: '0', margin: '0', fontSize: '22px' }
 
 AppSettingsPage({
   build(props) {
@@ -83,16 +86,28 @@ AppSettingsPage({
       ]),
       card(
         'All tasks',
-        'Tap a task to change its text or its repeat. Each one shows when it is next on the list.',
+        'Tap a task to change its text or its repeat. Each one shows when it is next on the list. The arrows move a task up or down; the watch lists them in this order.',
         active.length
-          ? active.map((task) =>
+          ? active.map((task, index) =>
               row(
                 [
-                  input({
-                    label: whenLabel(task, day),
-                    value: taskText(task),
-                    onChange: (value) => change((fresh) => editTask(fresh, task.id, value, day)),
-                  }),
+                  View({ style: { display: 'flex', flexDirection: 'row', alignItems: 'center' } }, [
+                    View({ style: { display: 'flex', flexDirection: 'column', gap: '6px', marginRight: '10px' } }, [
+                      button('▲', () => change((fresh) => moveTask(fresh, task.id, -1)), {
+                        style: { ...MOVE, opacity: index === 0 ? '0.3' : '1' },
+                      }),
+                      button('▼', () => change((fresh) => moveTask(fresh, task.id, 1)), {
+                        style: { ...MOVE, opacity: index === active.length - 1 ? '0.3' : '1' },
+                      }),
+                    ]),
+                    View({ style: { flex: 1, minWidth: 0 } }, [
+                      input({
+                        label: whenLabel(task, day),
+                        value: taskText(task),
+                        onChange: (value) => change((fresh) => editTask(fresh, task.id, value, day)),
+                      }),
+                    ]),
+                  ]),
                 ],
                 button('Delete', () => change((fresh) => deleteTask(fresh, task.id)), {
                   style: { ...SIDE, color: THEME.bad },

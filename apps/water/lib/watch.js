@@ -5,7 +5,7 @@ import { LocalStorage } from '@zos/storage'
 import { Time, Sleep, Wear, Vibrator, VIBRATOR_SCENE_STRONG_REMINDER } from '@zos/sensor'
 import { set, cancel, getAllAlarms, REPEAT_ONCE } from '@zos/alarm'
 
-import { LAST_KEY, OFF_KEY, SETTINGS_KEY, normaliseSettings, clockOffset, sleepSpan, reminderTimes } from './water'
+import { LAST_KEY, OFF_KEY, SPENT_KEY, SETTINGS_KEY, normaliseSettings, clockOffset, sleepSpan, reminderTimes } from './water'
 
 export const SERVICE = 'app-service/remind'
 
@@ -74,6 +74,17 @@ export function loadOff() {
 
 export const saveOff = (t) => store().setItem(OFF_KEY, t)
 
+export function loadSpent() {
+  try {
+    const n = Number(store().getItem(SPENT_KEY, 0))
+    return Number.isFinite(n) && n > 0 ? n : 0
+  } catch (e) {
+    return 0
+  }
+}
+
+export const saveSpent = (t) => store().setItem(SPENT_KEY, t)
+
 export function loadLast() {
   const n = Number(store().getItem(LAST_KEY, 0))
   return Number.isFinite(n) && n > 0 ? n : 0
@@ -98,7 +109,7 @@ export function saveSettings(raw) {
 // Replaces every alarm of this app with the reminders that follow. Returns the
 // first one, 0 if none could be set. `after` keeps a reminder that is firing
 // right now from being set again.
-export function plan({ last, night, paused, settings, now, after = now }) {
+export function plan({ last, night, paused, settings, now, spent = 0, after = now }) {
   let ids = []
   try {
     ids = getAllAlarms() || []
@@ -114,7 +125,7 @@ export function plan({ last, night, paused, settings, now, after = now }) {
   })
 
   let next = 0
-  reminderTimes({ last, night, paused, now, settings, after }).forEach((t) => {
+  reminderTimes({ last, night, paused, now, settings, spent, after }).forEach((t) => {
     let id = 0
     try {
       const at = Math.floor(t / 1000)

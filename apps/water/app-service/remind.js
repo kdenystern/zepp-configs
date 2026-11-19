@@ -19,9 +19,11 @@ import {
   loadOff,
   saveOff,
   loadSettings,
+  loadSpent,
+  saveSpent,
   plan,
 } from '../lib/watch'
-import { shouldBuzz, liftOff } from '../lib/water'
+import { shouldBuzz, liftOff, counted } from '../lib/water'
 
 AppService({
   onInit() {
@@ -53,6 +55,14 @@ AppService({
       // While still off, the time since it came off does not count either.
       state.last = liftOff(state.last, off, state.now)
       state.paused = state.asleep || !!off
+      // The level only goes down between taps: keep the most counted so far.
+      try {
+        state.spent = loadSpent()
+        const total = counted(state)
+        if (state.last && total > state.spent && total !== Infinity) saveSpent((state.spent = total))
+      } catch (e) {
+        console.log('water: spent: ' + e)
+      }
     }
 
     if (!state || shouldBuzz(state)) {

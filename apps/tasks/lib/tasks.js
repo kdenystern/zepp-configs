@@ -203,14 +203,13 @@ function normaliseTask(raw) {
   }
 }
 
-// Coerces whatever came out of storage or over the air into valid tasks in
-// id order, which is the order they were added in.
+// Coerces whatever came out of storage or over the air into valid tasks,
+// keeping their order: the list order set on the phone (new tasks go last).
 export function normaliseTasks(raw) {
   const seen = {}
   return (Array.isArray(raw) ? raw : [])
     .map(normaliseTask)
     .filter((task) => task && !seen[task.id] && (seen[task.id] = true))
-    .sort((a, b) => a.id - b.id)
 }
 
 export const dueTasks = (tasks, day) => tasks.filter((task) => isDue(task, day))
@@ -282,6 +281,20 @@ export function deleteTask(db, id) {
   return db.tasks.length < before
 }
 
+// Moves an active task one place up (step -1) or down (+1) among the active
+// tasks; finished one-offs in between are skipped. Returns whether it moved.
+export function moveTask(db, id, step) {
+  const from = db.tasks.findIndex((task) => task.id === Number(id))
+  if (from < 0 || isFinished(db.tasks[from])) return false
+  let to = from + step
+  while (to >= 0 && to < db.tasks.length && isFinished(db.tasks[to])) to += step
+  if (to < 0 || to >= db.tasks.length) return false
+  const task = db.tasks[from]
+  db.tasks[from] = db.tasks[to]
+  db.tasks[to] = task
+  return true
+}
+
 export function checkTask(db, undo, id, day) {
   const task = find(db, id)
   if (!task || !isDue(task, day)) return null
@@ -345,7 +358,7 @@ export function current(state) {
     // Not in the phone's list: a finished one-off brought back by undo.
     else tasks.push(copy(change))
   })
-  return tasks.sort((a, b) => a.id - b.id)
+  return tasks
 }
 
 export function watchCheck(state, id, day) {
