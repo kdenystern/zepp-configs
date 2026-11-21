@@ -1,84 +1,59 @@
-// Woken by an alarm when the wait should have run out (see lib/watch.js
-// plan()), and by the system when the watch goes on or off the wrist or you
-// fall asleep or wake up (app.json "app-event"). Buzzes the motor if the wait
-// has run out in time that counts, then sets the reminders again from now on,
-// so they keep coming even if the app is not opened for days.
+// Woken by an alarm (lib/watch.js plan()) and by the system when the watch
+// goes on or off the wrist (or moves on it), or you fall asleep or wake up
+// (app.json "app-event"). Buzzes the motor if the wait has run out in time
+// that counts and you are awake with the watch on; the page shows empty at
+// exactly that point, since both go by lib/water.js isDue().
 //
-// Off the wrist: the moment is stored in `off`; when the watch is back on, the
-// last tap is moved on by the time it was off, so that time does not count.
-//
-// It has no screen and only 600 ms. Every step is guarded: if nothing can be
-// read, it still buzzes.
-import {
-  clockNow,
-  readSleep,
-  readWorn,
-  buzz,
-  loadLast,
-  saveLast,
-  loadOff,
-  saveOff,
-  loadSettings,
-  loadSpent,
-  saveSpent,
-  plan,
-} from '../lib/watch'
-import { shouldBuzz, liftOff, counted } from '../lib/water'
+// It reads everything afresh each time and writes only the wear record, and
+// only when the watch went on or off. Nothing it decides depends on that
+// write succeeding: it may write files only while the screen is off, and a
+// write that fails is made by the next look. It has no screen, no timers and
+// 600 ms.
+import { clockNow, readSleep, readWorn, loadRecord, loadOffs, saveOffs, buzz, plan } from '../lib/watch'
+import { noteWear, isOff, counted, isDue, checkTimes } from '../lib/water'
+
+// Alarms the service sets each time: it sets them again at every look, so a
+// few are enough to carry on if one look is cut short.
+const SERVICE_ALARMS = 4
+
+function look(params) {
+  const record = loadRecord()
+  // Never opened, or the record unreadable: nothing to remind of. Quiet is
+  // the safe side; the page writes the record as soon as it opens.
+  if (!record.tap) return
+
+  const { now, offset } = clockNow()
+  const { asleep, night } = readSleep(now, offset, true)
+  const before = loadOffs()
+  const offs = noteWear(before, readWorn(), now, record.tap)
+  const paused = asleep || isOff(offs)
+  const spent = counted({ ...record, night, offs, now })
+
+  if (!paused && isDue(spent, record.gap)) {
+    try {
+      buzz()
+    } catch (e) {
+      console.log('water: buzz failed: ' + e)
+    }
+  }
+
+  const changed = offs !== before
+  if (changed) saveOffs(offs)
+
+  // The watch moving on the wrist wakes this often and changes nothing:
+  // the alarms set before still stand.
+  const event = params.indexOf('event') >= 0
+  if (!event || changed || params.indexOf('sleep') >= 0) {
+    plan(checkTimes({ spent, gap: record.gap, paused, now, max: SERVICE_ALARMS }))
+  }
+}
 
 AppService({
-  onInit() {
-    let state = null
+  onInit(params) {
     try {
-      const { now, offset } = clockNow()
-      state = { now, last: loadLast(), settings: loadSettings(), ...readSleep(now, offset, true) }
+      look(typeof params === 'string' ? params : '')
     } catch (e) {
-      state = null
-    }
-
-    let off = 0
-    if (state) {
-      try {
-        off = loadOff()
-        const worn = readWorn()
-        if (worn === false && !off) {
-          off = state.now
-          saveOff(off)
-        } else if (worn === true && off) {
-          state.last = liftOff(state.last, off, state.now)
-          saveLast(state.last)
-          off = 0
-          saveOff(0)
-        }
-      } catch (e) {
-        console.log('water: wear: ' + e)
-      }
-      // While still off, the time since it came off does not count either.
-      state.last = liftOff(state.last, off, state.now)
-      state.paused = state.asleep || !!off
-      // The level only goes down between taps: keep the most counted so far.
-      try {
-        state.spent = loadSpent()
-        const total = counted(state)
-        if (state.last && total > state.spent && total !== Infinity) saveSpent((state.spent = total))
-      } catch (e) {
-        console.log('water: spent: ' + e)
-      }
-    }
-
-    if (!state || shouldBuzz(state)) {
-      try {
-        buzz()
-      } catch (e) {
-        console.log('water: buzz failed: ' + e)
-      }
-    }
-
-    if (!state) return
-    try {
-      // A minute on, so this very reminder is not set again.
-      plan({ ...state, after: state.now + 60000 })
-    } catch (e) {
-      console.log('water: could not plan: ' + e)
+      console.log('water: ' + e)
     }
   },
   onDestroy() {},

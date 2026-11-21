@@ -162,7 +162,8 @@ away and passes on what was checked off the next time the app opens within reach
 The screen is a water level with a drop in the middle. Tap the drop after a drink and
 the level fills up again. It drains over three hours, or however long you set in the
 Water settings in the Zepp app, in steps of a quarter of an hour. When it runs dry the
-drop turns red and the watch buzzes, with no notification.
+drop turns red and the watch buzzes, with no notification, then again every five
+minutes until the drop is tapped.
 
 Only time awake with the watch on counts. The level stands still while you sleep (by
 the watch's sleep tracking) and while the watch is off your wrist, and carries on from

@@ -19,7 +19,7 @@ AppSettingsPage({
     return page([
       card(
         'Reminder',
-        'The watch buzzes when this long has passed without the drop tapped. Time asleep, or with the watch off your wrist, does not count.',
+        'The watch buzzes when this long has passed without the drop tapped, then every 5 minutes until it is. Time asleep, or with the watch off your wrist, does not count.',
         [
           row(
             [text('Remind after', { margin: '0' }), note(gapLabel(settings.gap), { margin: '0' })],

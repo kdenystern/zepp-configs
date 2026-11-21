@@ -16,6 +16,9 @@ export function resetWorld() {
     launched: [], // launchApp() calls
     toasts: [],
     files: {}, // LocalStorage contents; survives app restarts
+    dataFiles: {}, // @zos/fs files in the app's /data folder, path -> text
+    screenOn: false, // an App Service cannot write files while it is on
+    inService: false, // an App Service is running right now
     burned: 1830, // Calorie sensor reading, or null to make it throw
     now: new Date(2026, 10, 16, 12, 0, 0),
     installedApps: {}, // English name -> appId, for getAppIdByName
@@ -35,7 +38,8 @@ export function resetWorld() {
     alarmsBroken: false, // alarm.set fails (returns 0)
     notifications: [], // what @zos/notification sent
     vibrations: [], // modes the Vibrator started
-    worn: true, // the Wear sensor: true, false, or null for not sure
+    buzzing: false, // started and not yet stopped
+    worn: true, // the Wear sensor: true, false, 'moving', or null for not sure
     sleep: null, // { asleep, startTime, endTime, totalTime } for the Sleep sensor
     sleepBroken: false,
   })
@@ -202,6 +206,11 @@ export function runService(url, param) {
   const definition = registry.services[url]
   if (!definition) throw new Error(`no such app service: ${url}`)
   const service = { ...definition, state: structuredClone(definition.state || {}) }
-  if (service.onInit) service.onInit(param)
-  if (service.onDestroy) service.onDestroy()
+  world.inService = true
+  try {
+    if (service.onInit) service.onInit(param)
+    if (service.onDestroy) service.onDestroy()
+  } finally {
+    world.inService = false
+  }
 }

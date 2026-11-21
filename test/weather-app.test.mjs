@@ -88,6 +88,15 @@ async function open() {
   await flush()
 }
 
+// The cover over the charts, with the spinner, while a day is being drawn.
+const cover = () => world.widgets.filter((w) => w.parent && w.parent.params.z_index === 1 && w.visible)
+// Taps the place, then waits for the new day to be drawn under the cover.
+async function flip() {
+  tap(chip())
+  for (let i = 0; i < 200 && cover().length; i++) await new Promise((resolve) => setTimeout(resolve, 5))
+  assert.equal(cover().length, 0, 'still drawing')
+}
+
 // --- first run and choosing a place ---
 
 test('with no place chosen it says where to choose one', async () => {
@@ -229,13 +238,14 @@ test('every widget is on the screen and every image exists', async () => {
   choose(HELSINKI)
   for (const tomorrow of [false, true]) {
     await open()
-    if (tomorrow) tap(chip())
+    if (tomorrow) await flip()
     assert.ok(world.widgets.length < 250, `${world.widgets.length} widgets`)
     for (const w of world.widgets) {
       const { x, y, w: width = 0, h = 0 } = w.params
       assert.ok(x >= 0 && y >= 0 && x + width <= 390 && y + h <= 450, `${w.type} at ${x},${y} ${width}x${h}`)
       // Clear of the rounded corners (radius 86) at the widget's own height.
-      if (w.type === 'FILL_RECT' || w.type === 'IMG') {
+      // (The black cover may run into them.)
+      if ((w.type === 'FILL_RECT' && w.params.color !== 0x000000) || w.type === 'IMG') {
         const inset = (edge) => (edge >= 86 ? 0 : 86 - Math.sqrt(86 * 86 - (86 - edge) ** 2))
         const cut = Math.max(inset(y), inset(450 - (y + h)))
         assert.ok(x >= cut && x + width <= 390 - cut, `${w.type} at ${x},${y} is cut by a corner`)
@@ -274,7 +284,7 @@ test('tapping the place flips to tomorrow and back', async () => {
   online()
   choose(HELSINKI)
   await open()
-  tap(chip())
+  await flip()
   assert.equal(chip().params.text, 'Helsinki, tomorrow')
   for (const text of ['6°', 'Drizzle', 'Low 5°', '5° to 6°', 'Total 6.7 mm, up to 100%', '6 to 9 m/s, gusts 14']) {
     assert.ok(texts().includes(text), `"${text}" not in ${JSON.stringify(texts())}`)
@@ -286,9 +296,33 @@ test('tapping the place flips to tomorrow and back', async () => {
   assert.equal(rects(0x8a8a8a).length, 0)
   assert.equal(rects(0x225189).length, 0)
 
-  tap(chip())
+  await flip()
   assert.equal(chip().params.text, 'Helsinki, today')
   assert.equal(rects(0x8a8a8a).length, 3)
+})
+
+test('a flip names the new day and covers the charts with a spinner at once', async () => {
+  online()
+  choose(HELSINKI)
+  await open()
+  const before = world.widgets.length
+  tap(chip())
+  // Nothing redrawn yet: the chip already says tomorrow, the old day is hidden.
+  assert.equal(world.widgets.length, before)
+  assert.equal(chip().params.text, 'Helsinki, tomorrow')
+  const black = cover().filter((w) => w.params.color === 0x000000)
+  assert.equal(black.length, 1)
+  assert.ok(black[0].parent.params.y >= 46, 'the chip stays in view')
+  // One bright dot, which goes round while the day is drawn.
+  const head = () => cover().filter((w) => w.params.color === 0xffffff).map((w) => `${w.params.x},${w.params.y}`)
+  assert.equal(head().length, 1)
+  // A second tap while it draws is ignored.
+  tap(chip())
+  assert.equal(chip().params.text, 'Helsinki, tomorrow')
+  for (let i = 0; i < 200 && cover().length; i++) await new Promise((resolve) => setTimeout(resolve, 5))
+  assert.equal(cover().length, 0)
+  assert.ok(texts().includes('Low 5°'))
+  assert.equal(chip().params.text, 'Helsinki, tomorrow')
 })
 
 // --- units ---

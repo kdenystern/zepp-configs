@@ -1,22 +1,57 @@
-// Watch-side glue shared by the page and the reminder service: the time of
-// the last tap, the settings, the clock, the sleep data, whether the watch is
-// worn, the buzz, and the alarms that wake the service.
-import { LocalStorage } from '@zos/storage'
+// Watch-side glue shared by the page and the reminder service: the two
+// stored records, the clock, the sleep data, whether the watch is worn, the
+// buzz, and the alarms that wake the service.
+//
+// The records are small JSON files read from the file system every time.
+// Not LocalStorage: an instance of it keeps the data in memory (so say the
+// docs), and the page and the service each holding their own copy, each
+// writing it back whole, is how the page could show a fresh tap while the
+// service still buzzed for the old one. Each record has one job: the page's
+// record is written only by the page; the wear record only ever gains a span
+// or closes one, read just before it is written.
+import { readFileSync, writeFileSync } from '@zos/fs'
 import { Time, Sleep, Wear, Vibrator, VIBRATOR_SCENE_STRONG_REMINDER } from '@zos/sensor'
 import { set, cancel, getAllAlarms, REPEAT_ONCE } from '@zos/alarm'
 
-import { LAST_KEY, OFF_KEY, SPENT_KEY, SETTINGS_KEY, normaliseSettings, clockOffset, sleepSpan, reminderTimes } from './water'
+import { normaliseRecord, normaliseOffs, clockOffset, sleepSpan } from './water'
 
 export const SERVICE = 'app-service/remind'
+const RECORD_FILE = 'water.json'
+const WEAR_FILE = 'wear.json'
 
-let storage = null
 let time = null
 let sleep = null
+let wear = null
 
-function store() {
-  if (!storage) storage = new LocalStorage()
-  return storage
+// --- files ---
+
+function readJson(path) {
+  try {
+    const text = readFileSync({ path, options: { encoding: 'utf8' } })
+    return text ? JSON.parse(text) : null
+  } catch (e) {
+    return null
+  }
 }
+
+// False if it could not be written. An App Service may write files only
+// while the screen is off (docs: App Service, limitations).
+function writeJson(path, value) {
+  try {
+    writeFileSync({ path, data: JSON.stringify(value), options: { encoding: 'utf8' } })
+    return true
+  } catch (e) {
+    console.log('water: could not write ' + path + ': ' + e)
+    return false
+  }
+}
+
+export const loadRecord = () => normaliseRecord(readJson(RECORD_FILE))
+export const saveRecord = (record) => writeJson(RECORD_FILE, record)
+export const loadOffs = () => normaliseOffs(readJson(WEAR_FILE))
+export const saveOffs = (offs) => writeJson(WEAR_FILE, offs)
+
+// --- sensors ---
 
 // Now, and the wall clock's distance from UTC.
 export function clockNow() {
@@ -27,7 +62,7 @@ export function clockNow() {
 // What the watch knows about your sleep: `{ asleep, night }` (see sleepSpan).
 // `fresh` asks the system to update its sleep data first (it does so every 30
 // minutes on its own). Without the data, or the permission, you count as
-// awake and all the time since the last tap counts.
+// awake and all the time since the tap counts.
 export function readSleep(now, offset, fresh = false) {
   try {
     if (!sleep) sleep = new Sleep()
@@ -44,7 +79,8 @@ export function readSleep(now, offset, fresh = false) {
 // when the watch is not sure or cannot say.
 export function readWorn() {
   try {
-    const status = new Wear().getStatus()
+    if (!wear) wear = new Wear()
+    const status = wear.getStatus()
     if (status === 0) return false
     if (status === 1 || status === 2) return true
     return null
@@ -52,6 +88,8 @@ export function readWorn() {
     return null
   }
 }
+
+// --- the motor ---
 
 // The buzz: the motor's strong reminder pattern (four strong pulses), the
 // "4 times" button of the Buzz app. No notification: unread notifications
@@ -63,79 +101,47 @@ export function buzz() {
   vibrator.start()
 }
 
-export function loadOff() {
+// Ends a buzz that is still going (from a page "4 times" keeps going).
+export function stopBuzz() {
   try {
-    const n = Number(store().getItem(OFF_KEY, 0))
-    return Number.isFinite(n) && n > 0 ? n : 0
+    new Vibrator().stop()
+  } catch (e) {
+    // Nothing to stop.
+  }
+}
+
+// --- alarms ---
+
+function setAlarm(t) {
+  try {
+    const at = Math.floor(t / 1000)
+    // The docs name the time `time`; the official notification sample
+    // names it `date`. Both are given. `param` tells the service it was an
+    // alarm, not a system event.
+    return set({ url: SERVICE, param: 'alarm', time: at, date: at, repeat_type: REPEAT_ONCE, store: true }) || 0
   } catch (e) {
     return 0
   }
 }
 
-export const saveOff = (t) => store().setItem(OFF_KEY, t)
-
-export function loadSpent() {
+// Replaces the app's alarms with one for each time (ascending). The first
+// is set before any old one is cancelled: if alarms cannot be set from here,
+// the old ones stay, since an old reminder is better than none. Returns how
+// many were set.
+export function plan(times) {
+  let old = []
   try {
-    const n = Number(store().getItem(SPENT_KEY, 0))
-    return Number.isFinite(n) && n > 0 ? n : 0
+    old = getAllAlarms() || []
   } catch (e) {
-    return 0
+    old = []
   }
-}
-
-export const saveSpent = (t) => store().setItem(SPENT_KEY, t)
-
-export function loadLast() {
-  const n = Number(store().getItem(LAST_KEY, 0))
-  return Number.isFinite(n) && n > 0 ? n : 0
-}
-
-export const saveLast = (t) => store().setItem(LAST_KEY, t)
-
-export function loadSettings() {
-  try {
-    return normaliseSettings(JSON.parse(store().getItem(SETTINGS_KEY, '') || 'null'))
-  } catch (e) {
-    return normaliseSettings(null)
-  }
-}
-
-export function saveSettings(raw) {
-  const settings = normaliseSettings(raw)
-  store().setItem(SETTINGS_KEY, JSON.stringify(settings))
-  return settings
-}
-
-// Replaces every alarm of this app with the reminders that follow. Returns the
-// first one, 0 if none could be set. `after` keeps a reminder that is firing
-// right now from being set again.
-export function plan({ last, night, paused, settings, now, spent = 0, after = now }) {
-  let ids = []
-  try {
-    ids = getAllAlarms() || []
-  } catch (e) {
-    ids = []
-  }
-  ids.forEach((id) => {
+  if (!times.length || !setAlarm(times[0])) return 0
+  old.forEach((id) => {
     try {
       cancel(id)
     } catch (e) {
       // Already gone.
     }
   })
-
-  let next = 0
-  reminderTimes({ last, night, paused, now, settings, spent, after }).forEach((t) => {
-    let id = 0
-    try {
-      const at = Math.floor(t / 1000)
-      // The docs name the time `time`; the official notification sample
-      // names it `date`. Both are given.
-      id = set({ url: SERVICE, time: at, date: at, repeat_type: REPEAT_ONCE, store: true })
-    } catch (e) {
-      id = 0
-    }
-    if (id && !next) next = t
-  })
-  return next
+  return 1 + times.slice(1).filter(setAlarm).length
 }

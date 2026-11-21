@@ -227,6 +227,9 @@ if (app === 'watchface') {
   await flush()
   await snapshot('weather')
   tap(world.widgets.find((w) => w.type === 'BUTTON'))
+  if (process.env.LOADING) await snapshot('weather-loading')
+  // The new day is drawn under a spinner, a batch at a time.
+  await new Promise((resolve) => setTimeout(resolve, 1000))
   await snapshot('weather-tomorrow')
 } else if (app === 'tasks') {
   // Tasks are typed into the settings page on the phone.

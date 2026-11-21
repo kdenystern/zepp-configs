@@ -5,6 +5,11 @@
 // The forecast comes from the phone (see app-side/index.js). The last one is
 // kept on the watch, so the screen fills in at once and works without the
 // phone for the rest of the day.
+//
+// Drawing a day takes a couple of hundred widgets, which is slow on the
+// watch. So when the day is flipped, a spinner covers the charts at once and
+// the new day is drawn behind it a few widgets at a time, the spinner turning
+// in between.
 import { createWidget, deleteWidget, widget, align, prop, text_style, setStatusBarVisible } from '@zos/ui'
 import { LocalStorage } from '@zos/storage'
 import { Time } from '@zos/sensor'
@@ -52,6 +57,13 @@ const RAIN_BARS = { x: PLOT_X, y: RAIN.y + 20, w: PLOT_W, h: RAIN.h - 20 }
 const WIND = { x: PLOT_X, y: 352, w: PLOT_W, h: 40 }
 const AXIS_Y = 396
 const STATUS = { x: 95, y: 420, w: 200, h: 22 }
+const CHIP = { x: 62, y: 10, w: WIDTH - 124, h: 36 }
+
+// The spinner: a ring of dots under the header, one bright dot going round
+// with a fainter one behind it.
+const SPINNER = { x: 195, y: 245, r: 26, dot: 8, dots: 10, tick: 90 }
+// Widgets made or removed in one go between turns of the spinner.
+const BATCH = 20
 
 const COLOR = {
   text: 0xffffff,
@@ -91,6 +103,12 @@ function readStored() {
   }
 }
 
+// The header chip: the place, shortened, and the day.
+function chipText(forecast, tomorrow) {
+  const name = forecast.place.length > 12 ? forecast.place.slice(0, 11) + '.' : forecast.place
+  return `${name}, ${tomorrow ? 'tomorrow' : 'today'}`
+}
+
 // The watch's clock as UTC seconds.
 let time = null
 function nowSeconds() {
@@ -106,8 +124,19 @@ Page(
       tomorrow: false,
       // 'loading', 'ok', or why the last request failed (a PROBLEMS key)
       sync: 'loading',
+      // The day's widgets, all in the `content` layer. `queue` collects the
+      // ones the drawing code asks for (see add) until they are made.
       widgets: [],
+      queue: [],
       status: null,
+      chip: null,
+      content: null,
+      // The layer over the charts that hides them while a day is drawn.
+      cover: [],
+      dots: [],
+      spin: null,
+      // A redraw in progress: { again, stopped }.
+      job: null,
     },
 
     onInit() {
@@ -118,13 +147,50 @@ Page(
     build() {
       setStatusBarVisible(false)
       this.state.built = true
+      // Two layers, as in the Tasks app: the day, and over it (z_index 1) the
+      // cover with the spinner, hidden until a redraw needs it.
+      this.state.content = createWidget(widget.VIEW_CONTAINER, {
+        x: 0,
+        y: 0,
+        w: WIDTH,
+        h: 450,
+        scroll_enable: 0,
+      })
+      const top = CHIP.y + CHIP.h + 4
+      const cover = createWidget(widget.VIEW_CONTAINER, {
+        x: 0,
+        y: top,
+        w: WIDTH,
+        h: 450 - top,
+        z_index: 1,
+        scroll_enable: 0,
+      })
+      const black = cover.createWidget(widget.FILL_RECT, { x: 0, y: 0, w: WIDTH, h: 450 - top, color: 0x000000 })
+      const dots = []
+      for (let i = 0; i < SPINNER.dots; i++) {
+        const angle = (i / SPINNER.dots) * 2 * Math.PI
+        const x = Math.round(SPINNER.x + SPINNER.r * Math.sin(angle) - SPINNER.dot / 2)
+        const y = Math.round(SPINNER.y - top - SPINNER.r * Math.cos(angle) - SPINNER.dot / 2)
+        const dot = (color) =>
+          cover.createWidget(widget.FILL_RECT, { x, y, w: SPINNER.dot, h: SPINNER.dot, radius: SPINNER.dot / 2, color })
+        dots.push({ base: dot(COLOR.grid), trail: dot(COLOR.dim), head: dot(COLOR.text) })
+      }
+      this.state.dots = dots
+      this.state.cover = [black, ...dots.map((d) => d.base)]
+      this.showSpinner(false)
       this.render()
     },
 
     onDestroy() {
       this.state.built = false
+      if (this.state.job) this.state.job.stopped = true
+      this.state.job = null
+      if (this.state.spin) clearInterval(this.state.spin)
+      this.state.spin = null
       this.state.widgets = []
+      this.state.queue = []
       this.state.status = null
+      this.state.chip = null
     },
 
     // The phone says the place or the units changed while this is open.
@@ -169,10 +235,17 @@ Page(
       return forecast ? dayView(forecast, nowSeconds(), tomorrow) : null
     },
 
+    // Asks for a widget. It is made later (see render); the returned record
+    // gets its `widget` then.
     add(type, params) {
-      const w = createWidget(type, params)
-      this.state.widgets.push(w)
-      return w
+      const spec = { type, params, widget: null }
+      this.state.queue.push(spec)
+      return spec
+    },
+
+    make(spec) {
+      spec.widget = this.state.content.createWidget(spec.type, spec.params)
+      this.state.widgets.push(spec.widget)
     },
 
     text(x, y, w, h, text, size, color, alignH) {
@@ -193,10 +266,20 @@ Page(
       return this.add(widget.FILL_RECT, { x: r.x, y: r.y, w: r.w, h: r.h, color, radius: radius || 0 })
     },
 
-    render() {
-      this.state.widgets.forEach((w) => deleteWidget(w))
+    // Draws the screen again. With `covered`, the old day stays hidden under
+    // the spinner while the new one is made, a batch at a time. Otherwise it
+    // is all done at once.
+    render(covered) {
+      if (this.state.job) {
+        // A redraw is under way: it draws once more when it is done.
+        this.state.job.again = true
+        return
+      }
+      const old = this.state.widgets
       this.state.widgets = []
+      this.state.queue = []
       this.state.status = null
+      this.state.chip = null
 
       let view = this.view()
       if (!view && this.state.tomorrow) {
@@ -206,6 +289,57 @@ Page(
       }
       if (view) this.drawDay(view)
       else this.drawMessage()
+      const queue = this.state.queue
+      this.state.queue = []
+
+      if (!covered || !old.length) {
+        old.forEach((w) => deleteWidget(w))
+        queue.forEach((spec) => this.make(spec))
+        return
+      }
+
+      const job = { again: false, stopped: false }
+      this.state.job = job
+      this.showSpinner(true)
+      const step = () => {
+        if (job.stopped) return
+        let n = BATCH
+        while (n > 0 && old.length) {
+          deleteWidget(old.pop())
+          n--
+        }
+        while (n > 0 && queue.length) {
+          this.make(queue.shift())
+          n--
+        }
+        if (old.length || queue.length) {
+          setTimeout(step, 0)
+          return
+        }
+        this.state.job = null
+        this.showSpinner(false)
+        if (job.again) this.render(true)
+      }
+      // A moment first, so that the spinner is on the screen before the work.
+      setTimeout(step, SPINNER.tick)
+    },
+
+    // Shows or hides the cover and starts or stops the spinner turning.
+    showSpinner(on) {
+      const { cover, dots } = this.state
+      cover.forEach((w) => w.setProperty(prop.VISIBLE, on))
+      if (this.state.spin) clearInterval(this.state.spin)
+      this.state.spin = null
+      let at = 0
+      const turn = () => {
+        dots.forEach((d, i) => {
+          d.head.setProperty(prop.VISIBLE, on && i === at % dots.length)
+          d.trail.setProperty(prop.VISIBLE, on && i === (at + dots.length - 1) % dots.length)
+        })
+        at++
+      }
+      turn()
+      if (on) this.state.spin = setInterval(turn, SPINNER.tick)
     },
 
     drawMessage() {
@@ -318,18 +452,14 @@ Page(
 
     // Place and day (a button that flips the day), then the headline numbers.
     drawHeader(view, forecast) {
-      const name = forecast.place.length > 12 ? forecast.place.slice(0, 11) + '.' : forecast.place
-      this.add(widget.BUTTON, {
-        x: 62,
-        y: 10,
-        w: WIDTH - 124,
-        h: 36,
+      this.state.chip = this.add(widget.BUTTON, {
+        ...CHIP,
         radius: 18,
         normal_color: COLOR.chip,
         press_color: COLOR.chipPressed,
         color: COLOR.soft,
         text_size: 20,
-        text: `${name}, ${view.tomorrow ? 'tomorrow' : 'today'}`,
+        text: chipText(forecast, view.tomorrow),
         click_func: () => this.flipDay(),
       })
 
@@ -369,23 +499,29 @@ Page(
 
     showStatus() {
       const { status, forecast, sync } = this.state
-      if (!status) return
+      if (!status || !forecast) return
       const fetched = clock(forecast.at, forecast.offset)
       let text = `Updated ${fetched}`
       if (sync === 'loading') text = 'Updating...'
       else if (sync === 'offline') text = `No phone, from ${fetched}`
       else if (sync !== 'ok') text = `Not updated, from ${fetched}`
-      status.setProperty(prop.TEXT, text)
+      status.params.text = text
+      if (status.widget) status.widget.setProperty(prop.TEXT, text)
     },
 
     flipDay() {
+      // Still drawing the last flip.
+      if (this.state.job) return
       const view = this.view()
       if (!this.state.tomorrow && !(view && view.hasTomorrow)) {
         showToast({ content: 'No forecast for tomorrow yet' })
         return
       }
       this.state.tomorrow = !this.state.tomorrow
-      this.render()
+      // The chip names the new day at once; the rest follows under the spinner.
+      const chip = this.state.chip && this.state.chip.widget
+      if (chip) chip.setProperty(prop.MORE, { ...CHIP, text: chipText(this.state.forecast, this.state.tomorrow) })
+      this.render(true)
     },
   }),
 )

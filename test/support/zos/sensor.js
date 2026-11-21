@@ -68,14 +68,19 @@ export class Vibrator {
   }
   start() {
     world.vibrations.push(this.mode)
+    world.buzzing = true
   }
-  stop() {}
+  stop() {
+    world.buzzing = false
+  }
 }
 
-// world.worn: true on the wrist, false off it, null when the watch is not sure.
+// world.worn: true on the wrist, 'moving' on it and moving, false off it,
+// null when the watch is not sure.
 export class Wear {
   getStatus() {
     if (world.worn === null) return 3
+    if (world.worn === 'moving') return 2
     return world.worn ? 1 : 0
   }
   onChange() {}

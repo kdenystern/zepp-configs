@@ -95,6 +95,20 @@ watch stores that in `LocalStorage` and draws it before the phone answers. Units
 applied by the API, not converted on the watch. The app is not in the Launcher's
 default tiles: the user adds `Weather = app:68234:page/index @weather` on the phone.
 
+Weather's day flip (2026-11-21, user: tapping the date "feels unresponsive" until the
+new day appears). A flip needs no network, since the forecast already holds tomorrow;
+the wait comes from making and deleting the ~200 widgets. So the page has two
+`VIEW_CONTAINER`s, as in Tasks: `content` (every widget of the day) and a cover
+(`z_index: 1`, from under the chip down) holding a black `FILL_RECT` and a ring of 10
+dot `FILL_RECT`s. On a tap the chip text changes at once (`prop.MORE` with x/y/w/h), the
+cover shows, a `setInterval` (90 ms) moves the bright dot with `prop.VISIBLE`, and
+`render(true)` deletes the old widgets and makes the new ones, 20 per `setTimeout` tick.
+Drawing code calls `add()`, which only queues a spec; `make()` creates it later (the
+status line's spec gets its `widget` then). Taps during a redraw are ignored; a forecast
+arriving during one redraws again afterwards. Other redraws (data arriving) still
+happen in one go, without the spinner. Unseen on the watch: whether the screen repaints
+between timer ticks (if not, the spinner shows but does not turn), and the batch size.
+
 **Tasks.** Built 2026-11-16 because the user finds the built-in to-do app poor. Scope
 they set: daily tasks and quick reminders only (projects live in Notion, events in
 Google Calendar), one-off and repeating, stored on the phone for good, today's undone
@@ -152,60 +166,69 @@ they feel. Later on 2026-11-19, after trying Buzz: unread notifications (two or 
 seem to **silence vibrations**, so Water must **not send a notification, only buzz**;
 the "4 times" button (`VIBRATOR_SCENE_STRONG_REMINDER`, which they felt as repeated
 buzzing) is exactly the signal they want; time **off the wrist** must not count either;
-the wait should be finer (they want 2 h 45 min). Design:
-- Watch page: a full-width blue `FILL_RECT` from the bottom whose height is the share of
-  the wait left (`levelAt`). A thin-line Phosphor drop (`drop.png`, 150 px,
-  `drop_p.png` filled while pressed) is an image `BUTTON` in the middle; at zero a red
-  copy (`drop_red*.png`) is shown instead via `prop.VISIBLE`. Tapping either stores the
-  time in `LocalStorage` key `last` and refills. A global `setInterval` redraws every
-  20 s while open (cleared in `onDestroy`; global timers are documented for pages but
-  not yet used on this watch). Opening the app without tapping only settles a stored
-  off-wrist time (below).
-- Only **time awake** counts (`awakeSince`): from the last tap to now, minus the
-  overlap with the night from the `Sleep` sensor (`readSleep` in `lib/watch.js`,
-  permission `data:user.hd.sleep`, turned into `{ start, end }` by `sleepSpan`). Awake:
-  `getInfo()`'s `startTime`/`endTime` (minutes after local midnight), the night that
-  ended within the last day. Asleep (`getSleepingStatus() === 1`): from the latest
+the wait should be finer (they want 2 h 45 min). On 2026-11-20 they reported a stuck
+state (below) and asked for tidier code and state that works without back-and-forth
+testing; the state was rebuilt that day (by Claude Opus 5.5). Design:
+- **Two small JSON files in the app's `/data`**, read with `@zos/fs` `readFileSync` on
+  every use, never cached (`lib/watch.js`). `water.json` is the page's record
+  `{ tap, floor, gap }` (last tap, most time counted that the page has shown, wait in
+  minutes), written **only by the page**. `wear.json` is a list of spans off the wrist
+  `[start, end]` (`end` 0 while still off), updated by whoever sees the watch go off or
+  on (page or service) as a fresh read-then-write (`noteWear`). The service writes
+  nothing else, and nothing it decides depends on its write succeeding.
+- **Why not `LocalStorage`** (the first builds used it): its docs say an instance keeps
+  the data in memory; `lib/watch.js` held one instance per context, and both the page
+  and the service wrote it back whole (the page every 20 s), so each could overwrite
+  the other with a stale copy. Together with service file writes being refused while the
+  screen is on, that fits the 2026-11-20 report: after charging, it buzzed every few
+  minutes while the app showed full, taps did not stop it, and it fixed itself an hour
+  later. Not proven on hardware; the new layout makes the page and the service compute
+  from the same freshly read data.
+- One pure computation for both (`lib/water.js`): `counted()` = time since the tap minus
+  the union of the night (`sleepSpan`) and the off-wrist spans (`covered`), never less
+  than `floor`. `isDue()` (at most 1 min short of the wait) decides both the buzz and the
+  empty/red page, and `levelOf()` is 0 exactly then. A test drives two weeks of random
+  wear/sleep/screen/alarm/tap events and checks every buzz against the page.
+- Watch page: a full-width blue `FILL_RECT` from the bottom whose height is the level.
+  A thin-line Phosphor drop (`drop.png`, 150 px, `drop_p.png` filled while pressed) is
+  an image `BUTTON` in the middle; at zero a red copy (`drop_red*.png`) is shown instead
+  via `prop.VISIBLE`. A tap stops the motor (`stopBuzz`), writes `{ tap: now, floor: 0 }`
+  and replans. A global `setInterval` redraws every 20 s while open (cleared in
+  `onDestroy`), re-reading `wear.json`, the `Wear` sensor every time and the `Sleep`
+  sensor every 5 min; it stores `floor` when it has grown by a minute, and replans when
+  the pause (asleep or off) changes. The very first open (no `water.json`) starts full.
+  After the 2026-11-20 rebuild the first open starts full again (old `LocalStorage`
+  data is ignored; the wait comes back from the phone on open).
+- Sleep: `getInfo()`'s `startTime`/`endTime` (minutes after local midnight), the night
+  that ended within the last day. Asleep (`getSleepingStatus() === 1`): from the latest
   `startTime` until now, which assumes `getInfo()` reports the night in progress or a
-  similar bedtime (unknown). Only one night is subtracted. `updateInfo()` is called on
-  open and in the service; the page re-reads every 5 min while open. Without sleep data
-  all the time counts. The very first open stores a tap so it starts full.
-- **Off the wrist** (`Wear` sensor, `getStatus()`: 0 off, 1 worn, 2 moving, 3 unsure):
-  app.json has `"app-event": { "path": "app-service/remind" }` and the permissions
-  `event:os.health.wear_status` and `event:os.health.sleep_status`, so the system
-  wakes the service on those changes (docs: guides/framework/device/system-event).
-  Seen off: the service stores the moment in `LocalStorage` key `off`. Seen on (by the
-  service, or by the page opening): `liftOff` moves `last` on by the time off and
-  clears `off`. Without the events, the alarm checks notice it (every 30 min while
-  paused). Service writes are allowed with the screen off, per the docs.
-- Reminders: whenever the page opens or the drop is tapped, `plan()` cancels all of the
-  app's alarms (`getAllAlarms`) and sets one-shot `@zos/alarm`s (`store: true`, given
-  both `time` and `date` because the docs and the official notification sample
-  disagree on the name, plus `repeat_type: REPEAT_ONCE`): the first when the wait runs
-  out if you stay awake (or half an hour on while paused: asleep or off the wrist, or
-  a whole wait on once already due), then every `gap` up to 48 h / 24 alarms as a
-  fallback. Each alarm wakes the App Service `app-service/remind`, which buzzes only if
-  `shouldBuzz` (not paused, and at least `gap` minus 5 min counted since the tap) and
-  re-plans from its own state. If nothing can be read, it buzzes.
+  similar bedtime (unknown). `updateInfo()` is called on open and in the service.
+  Without sleep data all the time counts. Permission `data:user.hd.sleep`.
+- Off the wrist (`Wear`, `getStatus()`: 0 off, 1 worn, 2 moving, 3 unsure, which changes
+  nothing): app.json has `"app-event": { "path": "app-service/remind" }` and
+  `event:os.health.wear_status` / `event:os.health.sleep_status`, so the system wakes
+  the service on those changes. Worn and moving alternate, so the service is woken
+  often: those wakes change nothing and leave the alarms alone; the service replans
+  only on an alarm, a sleep event, or a real on/off change. The event param is told
+  apart by containing `event`; alarms carry `param: 'alarm'`.
+- Reminders (`checkTimes`, `plan`): one-shot `@zos/alarm`s (`store: true`, both `time`
+  and `date`, `REPEAT_ONCE`) waking `app-service/remind`. Not paused: when the wait runs
+  out, then every 5 min for an hour, then every 30 min; paused: every 30 min. The page
+  sets 24, the service 4 at each look (it sets them again every time, so nagging goes
+  on every 5 min until a tap). `plan` sets the first new alarm before cancelling the old
+  ones, so if setting fails nothing is lost. The service buzzes on any wake (alarm or
+  event) when due and not paused, which the user wants ("it buzzes 4 times and keeps
+  doing that every few minutes"). No `water.json` (never opened, or unreadable): the
+  service does nothing at all; the old "buzz if nothing can be read" is gone, since
+  that could buzz forever.
 - The buzz: `buzz()` in `lib/watch.js`, `Vibrator` `stop()`, `setMode(
   VIBRATOR_SCENE_STRONG_REMINDER)`, `start()`, the same calls as Buzz's "4 times".
   **No notification** (and no `device:os.notification` permission). Earlier builds
-  sent one, first with an "Open" action pointing at `page/index` (the docs say an
-  action's `file` must be an App Service), then "Drank"; the user disliked that name
-  and the notification is gone. Unknown: whether the vibration outlives the service's
-  600 ms, and whether it ever stops by itself (from a page it buzzes until the app
-  closes, see Buzz below).
-- Docs-based worries, all unseen on hardware: App Service single runs get 600 ms; the
-  docs' API table for services does not list `@zos/alarm` or `@zos/storage` (both are
-  wrapped in `try`), and says file writes work only with the screen off. How quickly `getSleepingStatus()` and
-  `endTime` follow real waking is unknown. Local time comes from the `Time` sensor via
-  `clockOffset()` (wall clock minus UTC, rounded to 15 min).
-- Only a tap refills (user, 2026-11-19): `LocalStorage` key `spent` holds the most
-  time counted since the tap, and `counted()` never returns less, so a later change
-  in the sleep data (e.g. `asleep` with an old `startTime`) cannot raise the level.
-  Reset to 0 only by a tap (or the very first open, which starts full). The open page
-  also reads `Wear` on every redraw and stops draining while it reads off (unsure
-  counts as worn).
+  sent one; the user disliked it and unread notifications silence vibrations.
+- Docs facts this rests on: App Service single runs get 600 ms and have no timers; the
+  services API table says `@zos/fs` writes work only with the screen off or in AOD and
+  does not list `@zos/alarm` (the official notification sample sets alarms from a
+  service anyway). Local time comes from the `Time` sensor via `clockOffset()`.
 - Settings page: "Remind after", with − and + pill `Button`s, 30 min to 6 h in 15 min
   steps, default 3 h (no `TextInput`, because of the white pop-up the user hates).
   Settings storage key `gap` (minutes as a string); the side service hands it over on
@@ -227,9 +250,12 @@ result (`notify`'s id 0 = not sent, `set`'s id 0 = alarm not set). No phone side
 settings page; the harness now allows apps without them. Tile:
 `Buzz = app:68237:page/index @buzz`. What the user reports from it decides Water's
 default vibration and whether alarms and services work at all.
-- Mocks: `test/support/zos/alarm.js`, `notification.js`, `Sleep`, `Wear` and `Vibrator`
-  in `sensor.js` (`world.sleep`, `world.sleepBroken`, `world.worn`, `world.vibrations`), the `AppService` global and `fireAlarm()` in the
-  harness (moves `world.now` to the alarm and runs the service).
+- Mocks: `test/support/zos/alarm.js`, `notification.js`, `fs.js` (`world.dataFiles`;
+  a service's writes throw while `world.screenOn`), `Sleep`, `Wear` and `Vibrator` in
+  `sensor.js` (`world.sleep`, `world.sleepBroken`, `world.worn` incl. `'moving'`,
+  `world.vibrations`, `world.buzzing`), the `AppService` global (`world.inService`
+  while it runs) and `fireAlarm()` in the harness (moves `world.now` to the alarm and
+  runs the service).
 
 **Launcher.** Any number of tiles up to 60, three square tiles per row; the first nine
 fill one screen under a status line, more rows scroll. Icon tiles are single image
@@ -296,10 +322,15 @@ Nutrition app fixed it. Treat it as a firmware bug to design around:
   page avoids characters beyond `°` on purpose).
 
 - Water: the first build was installed 2026-11-18 and the user noticed no buzz
-  (2026-11-19). Unseen: **alarms waking an App Service at all** (Buzz's "In 1 min" never
-  arrived), the `Vibrator` from a service, the system events and `Wear`, the service
-  reading and writing `LocalStorage` and setting alarms, the `Sleep` sensor (especially
-  `startTime` while asleep), and how many persistent alarms one app may hold (up to 24).
+  (2026-11-19). By 2026-11-20 the build with the motor buzz worked "normally": 4 buzzes,
+  repeated every few minutes while empty. Our alarms were 3 h apart then, so the
+  repeats were most likely wear-status events waking the service, which shows the
+  system events, `Wear` and the `Vibrator` from a service work. Whether **alarms**
+  wake the service is still unknown (Buzz's "In 1 min" never arrived). Unseen: `@zos/fs`
+  reads/writes from the page and the service (the file-based state is new on
+  2026-11-20), whether a service's writes really fail with the screen on, the `Sleep`
+  sensor (especially `startTime` while asleep), and how many persistent alarms one app
+  may hold (up to 24).
 - Buzz (user, 2026-11-19): the motor buttons work from a page. "4 times"
   (`setMode(VIBRATOR_SCENE_STRONG_REMINDER)` then `start()`) **buzzes continuously
   until the app is closed**, not four times; the user wants exactly that as Water's
@@ -420,6 +451,13 @@ lockscreen }`, `app.icon` is the preview image (266×307 for this watch), code i
 no settings page or side service. Cross-app data exists (`ShareLocalStorage` in
 `@zos/storage`, read with `@zos/share-storage`) but is unused here and was never
 confirmed on the watch.
+
+**Storage.** `LocalStorage` (`@zos/storage`): "an instance keeps loaded data in memory"
+(docs), so it is fine within one page but not for data a page and an App Service both
+touch; use `@zos/fs` `readFileSync`/`writeFileSync` with `options: { encoding: 'utf8' }`
+on a relative path (rooted at the app's `/data`, no permission needed), as the Zeus
+template's `utils/storage.js` does. An App Service may write files only with the screen
+off or in AOD.
 
 **No health write API.** The docs contain nothing for writing food, calorie intake or
 any health data into the Zepp app. Sensors such as `Calorie` are read-only.

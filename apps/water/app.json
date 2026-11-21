@@ -13,7 +13,6 @@
     "description": "A water level that drains; a buzz when it runs dry"
   },
   "permissions": [
-    "device:os.local_storage",
     "device:os.alarm",
     "device:os.bg_service",
     "data:user.hd.sleep",
